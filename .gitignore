@@ -1,0 +1,8 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+ui/node_modules/
+ui/dist/
+graphify-out/
+data/cache/

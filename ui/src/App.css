@@ -71,6 +71,32 @@ h1 {
   letter-spacing: 0.04em;
 }
 
+.symbol-add {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.symbol-add input {
+  min-width: 7.5rem;
+  background: #0f1612;
+  border: 1px solid #2a3830;
+  color: #e8f0ea;
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+}
+
+.symbol-add button {
+  background: #1e2a22;
+  border: 1px solid #3dba7a;
+  color: #c6f54c;
+  border-radius: 6px;
+  padding: 0.35rem 0.55rem;
+  cursor: pointer;
+  font: inherit;
+}
+
 .controls select {
   min-width: 140px;
   padding: 10px 12px;

@@ -1,7 +1,27 @@
 /** Browser WebSocket: live kline + 1s mark/ticker price (Binance → Bybit, auto-reconnect). */
 
-const TF_BINANCE = { '5m': '5m', '15m': '15m', '1h': '1h' }
-const TF_BYBIT = { '5m': '5', '15m': '15', '1h': '60' }
+const TF_BINANCE = {
+  '1m': '1m',
+  '3m': '3m',
+  '5m': '5m',
+  '15m': '15m',
+  '30m': '30m',
+  '1h': '1h',
+  '2h': '2h',
+  '4h': '4h',
+  '1d': '1d',
+}
+const TF_BYBIT = {
+  '1m': '1',
+  '3m': '3',
+  '5m': '5',
+  '15m': '15',
+  '30m': '30',
+  '1h': '60',
+  '2h': '120',
+  '4h': '240',
+  '1d': 'D',
+}
 
 /**
  * Normalized events:

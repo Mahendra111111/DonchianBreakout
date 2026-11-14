@@ -28,6 +28,7 @@ exports/parquet_cache/
 exports/strategy_research_report.json
 exports/_summarize_report.py
 exports/vwap_rejection_v1_experiment/
+exports/backtest_cache/
 exports/*.json
 exports/*.csv
 *.pkl

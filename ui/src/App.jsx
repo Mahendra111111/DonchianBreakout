@@ -3,8 +3,9 @@ import './App.css'
 import { fmtTime } from './fmtTime'
 import LiveDesk from './LiveDesk'
 import TradeChartModal from './TradeChartModal'
+import { SUPPORTED_TIMEFRAMES } from './timeframes'
 
-const SYMBOLS = [
+const FAVORITE_SYMBOLS = [
   'BTCUSDT',
   'ETHUSDT',
   'SOLUSDT',
@@ -21,7 +22,7 @@ const STRATEGIES = [
   'Hammer SMA VWAP',
   'VWAP Rejection V1',
 ]
-const TIMEFRAMES = ['1h', '15m', '5m']
+const TIMEFRAMES = SUPPORTED_TIMEFRAMES
 const PERIODS = [
   { id: '7d', label: '7 days' },
   { id: '15d', label: '15 days' },
@@ -42,6 +43,7 @@ function fmtPct(n) {
 
 export default function App() {
   const [symbol, setSymbol] = useState('SOLUSDT')
+  const [customSymbol, setCustomSymbol] = useState('')
   const [strategy, setStrategy] = useState('Donchian Breakout')
   const [timeframe, setTimeframe] = useState('1h')
   const [period, setPeriod] = useState('5y')
@@ -49,6 +51,7 @@ export default function App() {
   const [tradeList, setTradeList] = useState([])
   const [periodCards, setPeriodCards] = useState({})
   const [ranking, setRanking] = useState([])
+  const [resultSource, setResultSource] = useState(null)
   const [signals, setSignals] = useState([])
   const [recent, setRecent] = useState([])
   const [scanMeta, setScanMeta] = useState(null)
@@ -60,6 +63,21 @@ export default function App() {
   const [selectedIdx, setSelectedIdx] = useState(null)
   const [selectedLiveTrade, setSelectedLiveTrade] = useState(null)
   const pageSize = 50
+
+  const symbolOptions = useMemo(() => {
+    const set = new Set(FAVORITE_SYMBOLS)
+    if (symbol) set.add(symbol)
+    return [...set]
+  }, [symbol])
+
+  function applyCustomSymbol(e) {
+    e?.preventDefault?.()
+    const next = customSymbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+    if (!next) return
+    const sym = next.endsWith('USDT') ? next : `${next}USDT`
+    setSymbol(sym)
+    setCustomSymbol('')
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -76,6 +94,7 @@ export default function App() {
         if (cancelled) return
         if (!res.ok) throw new Error(data.error || `API ${res.status}`)
         setSummary(data.summary)
+        setResultSource(data.source || data.summary?.data_source || null)
         let trades = data.trade_list || []
         if (!trades.length && data.summary?.trades_file) {
           const tr = await fetch(`/trades/${data.summary.trades_file}`)
@@ -92,7 +111,8 @@ export default function App() {
         if (!cancelled) {
           setSummary(null)
           setTradeList([])
-          setError(e.message || 'Failed to load research results')
+          setResultSource(null)
+          setError(e.message || 'Failed to load backtest results')
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -188,10 +208,22 @@ export default function App() {
           <label>
             Symbol
             <select value={symbol} onChange={(e) => setSymbol(e.target.value)}>
-              {SYMBOLS.map((s) => (
+              {symbolOptions.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
+          </label>
+          <label>
+            Add symbol
+            <form className="symbol-add" onSubmit={applyCustomSymbol}>
+              <input
+                value={customSymbol}
+                onChange={(e) => setCustomSymbol(e.target.value.toUpperCase())}
+                placeholder="OPUSDT / NEAR"
+                spellCheck={false}
+              />
+              <button type="submit">Add</button>
+            </form>
           </label>
           <label>
             Candle TF
@@ -216,7 +248,12 @@ export default function App() {
       </header>
 
       {error && <div className="banner error">{error}</div>}
-      {loading && !summary && !error && <div className="banner">Loading research…</div>}
+      {loading && !summary && !error && (
+        <div className="banner">Fetching candles + running backtest…</div>
+      )}
+      {!loading && resultSource === 'on_demand' && (
+        <div className="banner">On-demand backtest · live exchange OHLCV (not a cached research JSON)</div>
+      )}
       {scanMsg && <div className="banner">{scanMsg}</div>}
 
       <LiveDesk

@@ -9,15 +9,10 @@ import {
 import { fmtTime } from './fmtTime'
 import { subscribeLiveStream } from './liveSocket'
 import { strategyOverlays } from './strategyIndicators'
+import { barMsFor } from './timeframes'
 
 const PAPER_POLL_MS = 60_000
 const TICK_POLL_MS = 1_000
-
-function barMsFor(timeframe) {
-  if (timeframe === '5m') return 5 * 60_000
-  if (timeframe === '15m') return 15 * 60_000
-  return 60 * 60_000
-}
 
 function barTimeSec(isoOrMs, timeframe) {
   const ms = typeof isoOrMs === 'number' ? isoOrMs : Date.parse(isoOrMs)
@@ -60,6 +55,7 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
   const [tickAt, setTickAt] = useState(null)
   const [countdown, setCountdown] = useState(() => candleCountdown(timeframe))
   const knownClosed = useRef(new Set())
+  const loadGenRef = useRef(0)
   const [freshNote, setFreshNote] = useState('')
 
   function clearPriceLines() {
@@ -236,11 +232,14 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
   }
 
   async function loadPaper({ seedChart } = { seedChart: false }) {
+    const gen = ++loadGenRef.current
     setBusy(true)
     try {
       const qs = new URLSearchParams({ symbol, timeframe, strategy })
       const res = await fetch(`/api/live?${qs}`)
       const body = await res.json()
+      // Ignore stale responses from a previous symbol/TF (fixes 1h flash on 15m switch)
+      if (gen !== loadGenRef.current) return
       if (!res.ok) throw new Error(body.error || `Live ${res.status}`)
 
       const prev = knownClosed.current
@@ -261,6 +260,7 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
 
       const series = candleSeriesRef.current
       if (seedChart && series && body.candles?.length) {
+        if (gen !== loadGenRef.current) return
         const candles = body.candles.map(({ time, open, high, low, close, volume }) => ({
           time, open, high, low, close, volume: volume ?? 0,
         }))
@@ -283,13 +283,13 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
           pendingTickRef.current = null
           applyTickPrice(p.price, p.source)
         }
-      } else if (series && readyRef.current) {
+      } else if (series && readyRef.current && gen === loadGenRef.current) {
         applyPaperMarkers(body)
       }
     } catch (e) {
-      setError(e.message || 'Live feed failed')
+      if (gen === loadGenRef.current) setError(e.message || 'Live feed failed')
     } finally {
-      setBusy(false)
+      if (gen === loadGenRef.current) setBusy(false)
     }
   }
 
@@ -357,9 +357,15 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
     knownClosed.current = new Set()
     setFreshNote('')
     readyRef.current = false
+    pendingTickRef.current = null
+    candlesRef.current = []
+    loadGenRef.current += 1
     loadPaper({ seedChart: true })
     const t = setInterval(() => loadPaper({ seedChart: false }), PAPER_POLL_MS)
-    return () => clearInterval(t)
+    return () => {
+      clearInterval(t)
+      loadGenRef.current += 1
+    }
   }, [symbol, timeframe, strategy])
 
   // Reliable live price: server ticker every 1s (works even when browser WS is blocked)

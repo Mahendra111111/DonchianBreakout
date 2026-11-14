@@ -8,11 +8,11 @@ import {
 } from 'lightweight-charts'
 import { fmtTime, toMs, tradingViewUrl } from './fmtTime'
 import { strategyOverlays } from './strategyIndicators'
+import { barMsFor } from './timeframes'
 
 function barTimeSec(isoOrMs, timeframe) {
   const ms = toMs(isoOrMs)
-  const barMs =
-    timeframe === '5m' ? 5 * 60_000 : timeframe === '15m' ? 15 * 60_000 : 60 * 60_000
+  const barMs = barMsFor(timeframe)
   return Math.floor(ms / barMs) * (barMs / 1000)
 }
 
@@ -148,7 +148,7 @@ export default function TradeChartModal({
           },
         ])
 
-        const pad = timeframe === '15m' ? 20 * 15 * 60 : 20 * 60 * 60
+        const pad = 20 * (barMsFor(timeframe) / 1000)
         chart.timeScale().setVisibleRange({
           from: entryT - pad,
           to: exitT + pad,

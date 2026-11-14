@@ -1,3 +1,5 @@
+import { tradingViewInterval } from './timeframes'
+
 export function fmtTime(isoOrMs) {
   if (isoOrMs == null || isoOrMs === '') return '—'
   const ms = typeof isoOrMs === 'number' ? isoOrMs : Date.parse(isoOrMs)
@@ -23,11 +25,9 @@ export function fmtTime(isoOrMs) {
 }
 
 export function tradingViewUrl(symbol, timeframe) {
-  const interval =
-    timeframe === '5m' ? '5' : timeframe === '15m' ? '15' : timeframe === '1h' ? '60' : '60'
   const params = new URLSearchParams({
     symbol: `BINANCE:${symbol}.P`,
-    interval,
+    interval: tradingViewInterval(timeframe),
   })
   return `https://www.tradingview.com/chart/?${params}`
 }

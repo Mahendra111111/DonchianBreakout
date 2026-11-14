@@ -1,9 +1,12 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { runOnDemandBacktest } from '../lib/backtest.mjs'
+import { STRATEGIES } from '../lib/strategies.mjs'
+import { PERIOD_DAYS, SUPPORTED_TIMEFRAMES } from '../lib/timeframes.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const PERIODS = ['7d', '15d', '1m', '3m', '6m', '1y', '3y', '5y']
+const PERIODS = Object.keys(PERIOD_DAYS)
 
 async function loadSummary() {
   const candidates = [
@@ -17,7 +20,7 @@ async function loadSummary() {
       /* try next */
     }
   }
-  throw new Error('strategy_summary.json not found')
+  return null
 }
 
 async function loadTrades(fileName) {
@@ -75,58 +78,67 @@ export default async function handler(req, res) {
   const strategy = String(req.query?.strategy || 'Donchian Breakout')
   const timeframe = String(req.query?.timeframe || '1h')
   const period = String(req.query?.period || '5y')
+  const forceOnDemand = String(req.query?.ondemand || '') === '1'
 
   try {
-    const data = await loadSummary()
-    const rows = (data.results || []).filter(
+    const data = forceOnDemand ? null : await loadSummary()
+    const rows = (data?.results || []).filter(
       (r) => r.symbol === symbol && r.strategy === strategy && r.timeframe === timeframe,
     )
-    if (!rows.length) {
-      res.status(404).json({
-        error: 'no research row for this selection',
-        strategies: data.strategies,
-        periods: data.periods || PERIODS,
-        hint: 'Run python strategy_research_report.py to refresh strategy_summary.json',
-      })
-      return
-    }
-    const row = rows[0]
-    const periods = row.periods || {}
-    const periodRow = periods[period] || periods['5y']
-    if (!periodRow) {
-      res.status(404).json({ error: `period ${period} missing`, periods: Object.keys(periods) })
-      return
-    }
 
-    const tradeList = await loadTrades(periodRow.trades_file)
-    const periodCards = {}
-    for (const key of data.periods || PERIODS) {
-      const p = periods[key]
-      if (!p) continue
-      periodCards[key] = {
-        period: key,
-        trades: p.trades,
-        net_return_pct: p.net_return_pct,
-        win_rate_pct: p.win_rate_pct,
-        profit_factor: p.profit_factor,
-        max_dd_pct: p.max_dd_pct,
-        trades_file: p.trades_file || null,
+    if (rows.length) {
+      const row = rows[0]
+      const periods = row.periods || {}
+      const periodRow = periods[period] || periods['5y']
+      if (periodRow) {
+        const tradeList = await loadTrades(periodRow.trades_file)
+        const periodCards = {}
+        for (const key of data.periods || PERIODS) {
+          const p = periods[key]
+          if (!p) continue
+          periodCards[key] = {
+            period: key,
+            trades: p.trades,
+            net_return_pct: p.net_return_pct,
+            win_rate_pct: p.win_rate_pct,
+            profit_factor: p.profit_factor,
+            max_dd_pct: p.max_dd_pct,
+            trades_file: p.trades_file || null,
+          }
+        }
+        const summary = metricsFromPeriod(periodRow, tradeList, symbol, strategy, timeframe, period)
+        summary.trades_file = periodRow.trades_file || null
+        res.status(200).json({
+          ready: true,
+          source: 'research',
+          summary,
+          trade_list: tradeList,
+          period_cards: periodCards,
+          periods: data.periods || PERIODS,
+          ranking: data.ranking,
+          updated: data.updated,
+          strategies: data.strategies || STRATEGIES,
+          timeframes: SUPPORTED_TIMEFRAMES,
+        })
+        return
       }
     }
 
-    const summary = metricsFromPeriod(periodRow, tradeList, symbol, strategy, timeframe, period)
-    summary.trades_file = periodRow.trades_file || null
-
+    // Permanent path: on-demand backtest when no static research row
+    const live = await runOnDemandBacktest({ symbol, strategy, timeframe, period })
     res.status(200).json({
-      ready: true,
-      summary,
-      trade_list: tradeList,
-      period_cards: periodCards,
-      periods: data.periods || PERIODS,
-      ranking: data.ranking,
-      updated: data.updated,
+      ...live,
+      ranking: data?.ranking || [],
+      updated: data?.updated || live.scannedAt,
+      strategies: data?.strategies || STRATEGIES,
+      timeframes: SUPPORTED_TIMEFRAMES,
     })
   } catch (e) {
-    res.status(500).json({ error: String(e.message || e) })
+    res.status(400).json({
+      error: String(e.message || e),
+      strategies: STRATEGIES,
+      timeframes: SUPPORTED_TIMEFRAMES,
+      periods: PERIODS,
+    })
   }
 }

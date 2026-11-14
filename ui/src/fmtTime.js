@@ -23,7 +23,8 @@ export function fmtTime(isoOrMs) {
 }
 
 export function tradingViewUrl(symbol, timeframe) {
-  const interval = timeframe === '15m' ? '15' : timeframe === '1h' ? '60' : '60'
+  const interval =
+    timeframe === '5m' ? '5' : timeframe === '15m' ? '15' : timeframe === '1h' ? '60' : '60'
   const params = new URLSearchParams({
     symbol: `BINANCE:${symbol}.P`,
     interval,

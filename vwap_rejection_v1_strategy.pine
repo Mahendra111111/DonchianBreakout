@@ -1,0 +1,88 @@
+//@version=6
+// =============================================================================
+// KEEP IN SYNC WITH: vwap_rejection_v1.py + lib/strategies.mjs (vwapRejectionSignals)
+// Strategy ID: VWAP_REJECTION_V1
+// =============================================================================
+// Rules:
+//   1) Session VWAP (HLC3), resets each UTC day
+//   2) Bullish rejection: lower wick >= 2*body, upper wick <= body, low<=VWAP, close>VWAP
+//   3) Bearish rejection: upper wick >= 2*body, lower wick <= body, high>=VWAP, close<VWAP
+//   4) Volume: V > V[1] > V[2] and V > SMA(volume, 20)
+//   5) Entry: next bar open (strategy.entry processes on close → next open fill in TV)
+//   6) SL = rejection candle extreme; TP = 2R; no pyramiding
+// =============================================================================
+
+strategy(
+     "VWAP Rejection + Increasing Volume V1",
+     overlay=true,
+     pyramiding=0,
+     process_orders_on_close=true,
+     margin_long=100,
+     margin_short=100,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10)
+
+grpRej = "Rejection"
+minWickBody = input.float(2.0, "Min wick/body", step=0.1, group=grpRej)
+maxOppWick  = input.float(1.0, "Max opposite wick/body", step=0.1, group=grpRej)
+
+grpVol = "Volume"
+volSmaLen = input.int(20, "Volume SMA", minval=2, group=grpVol)
+
+grpRisk = "Risk"
+rrRatio = input.float(2.0, "Reward:Risk", step=0.1, group=grpRisk)
+allowLong  = input.bool(true, "Allow long", group=grpRisk)
+allowShort = input.bool(true, "Allow short", group=grpRisk)
+
+showVWAP = input.bool(true, "Show VWAP")
+vwapColor = input.color(color.new(#2962FF, 0), "VWAP color")
+
+vwap = ta.vwap(hlc3)
+plot(showVWAP ? vwap : na, title="Session VWAP", color=vwapColor, linewidth=2)
+
+body   = math.abs(close - open)
+upWick = high - math.max(close, open)
+dnWick = math.min(close, open) - low
+volSma = ta.sma(volume, volSmaLen)
+volInc = volume > volume[1] and volume[1] > volume[2]
+volOk  = volInc and not na(volSma) and volume > volSma
+
+bullishRej =
+     body > 0
+     and dnWick >= minWickBody * body
+     and upWick <= maxOppWick * body
+     and not na(vwap)
+     and low <= vwap
+     and close > vwap
+     and volOk
+
+bearishRej =
+     body > 0
+     and upWick >= minWickBody * body
+     and dnWick <= maxOppWick * body
+     and not na(vwap)
+     and high >= vwap
+     and close < vwap
+     and volOk
+
+longSignal  = allowLong and bullishRej
+shortSignal = allowShort and bearishRej
+
+plotshape(longSignal, title="Long", style=shape.labelup, location=location.belowbar, color=color.green, textcolor=color.white, text="L", size=size.tiny)
+plotshape(shortSignal, title="Short", style=shape.labeldown, location=location.abovebar, color=color.red, textcolor=color.white, text="S", size=size.tiny)
+
+longSL  = low
+shortSL = high
+
+if longSignal
+    alert("VWAP_REJECTION_V1 LONG", alert.freq_once_per_bar_close)
+    strategy.entry("Long", strategy.long)
+    risk = strategy.position_avg_price - longSL
+    // SL/TP set from signal bar extremes; TV fills entry next open when process_orders_on_close
+    strategy.exit("Long Exit", "Long", stop=longSL, limit=strategy.position_avg_price + risk * rrRatio)
+
+if shortSignal
+    alert("VWAP_REJECTION_V1 SHORT", alert.freq_once_per_bar_close)
+    strategy.entry("Short", strategy.short)
+    risk = shortSL - strategy.position_avg_price
+    strategy.exit("Short Exit", "Short", stop=shortSL, limit=strategy.position_avg_price - risk * rrRatio)

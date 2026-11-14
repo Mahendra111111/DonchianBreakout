@@ -4,9 +4,24 @@ import { fmtTime } from './fmtTime'
 import LiveDesk from './LiveDesk'
 import TradeChartModal from './TradeChartModal'
 
-const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
-const STRATEGIES = ['Donchian Breakout', 'EMA Trend Following', 'Hammer SMA VWAP']
-const TIMEFRAMES = ['1h', '15m']
+const SYMBOLS = [
+  'BTCUSDT',
+  'ETHUSDT',
+  'SOLUSDT',
+  'BNBUSDT',
+  'XRPUSDT',
+  'DOGEUSDT',
+  'LINKUSDT',
+  'AVAXUSDT',
+  'ADAUSDT',
+]
+const STRATEGIES = [
+  'Donchian Breakout',
+  'EMA Trend Following',
+  'Hammer SMA VWAP',
+  'VWAP Rejection V1',
+]
+const TIMEFRAMES = ['1h', '15m', '5m']
 const PERIODS = [
   { id: '7d', label: '7 days' },
   { id: '15d', label: '15 days' },

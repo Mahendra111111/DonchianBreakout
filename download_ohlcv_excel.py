@@ -26,7 +26,10 @@ INTERVALS = {
     '1h': (Client.KLINE_INTERVAL_1HOUR, 60 * 60 * 1000),
 }
 
-SYMBOLS = ('BTCUSDT', 'ETHUSDT', 'SOLUSDT')
+SYMBOLS = (
+    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
+    'DOGEUSDT', 'LINKUSDT', 'AVAXUSDT', 'ADAUSDT',
+)
 
 
 def as_utc_ms(dt: datetime) -> int:

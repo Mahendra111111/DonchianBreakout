@@ -14,7 +14,9 @@ const PAPER_POLL_MS = 60_000
 const TICK_POLL_MS = 1_000
 
 function barMsFor(timeframe) {
-  return timeframe === '15m' ? 15 * 60_000 : 60 * 60_000
+  if (timeframe === '5m') return 5 * 60_000
+  if (timeframe === '15m') return 15 * 60_000
+  return 60 * 60_000
 }
 
 function barTimeSec(isoOrMs, timeframe) {
@@ -275,6 +277,11 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
           setLastPrice(last.close)
           setTickAt(Date.now())
           setLivePriceLine(last.close)
+        }
+        if (pendingTickRef.current) {
+          const p = pendingTickRef.current
+          pendingTickRef.current = null
+          applyTickPrice(p.price, p.source)
         }
       } else if (series && readyRef.current) {
         applyPaperMarkers(body)

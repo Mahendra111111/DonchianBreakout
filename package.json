@@ -9,6 +9,9 @@
     "build": "npm run build -w ui",
     "dev": "npm run dev -w ui",
     "scan": "node scripts/run_scan.mjs",
-    "research": "python -u strategy_research_report.py"
+    "research": "python -u strategy_research_report.py",
+    "test": "node --test tests/vwap_rejection_v1.test.mjs",
+    "test:py": "python -m pytest tests -q",
+    "experiment:vwap": "python -u scripts/run_vwap_rejection_experiment.py"
   }
 }

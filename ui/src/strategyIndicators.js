@@ -132,5 +132,14 @@ export function strategyOverlays(strategy, candles) {
     }
   }
 
+  if (strategy === 'VWAP Rejection V1') {
+    return {
+      label: 'Session VWAP',
+      lines: [
+        { title: 'Session VWAP', color: '#b388ff', data: toLine(candles, sessionVwap(candles)) },
+      ],
+    }
+  }
+
   return { label: '', lines: [] }
 }

@@ -1,0 +1,60 @@
+{
+  "strategy": {
+    "id": "VWAP_REJECTION_V1",
+    "name": "VWAP Rejection V1",
+    "enabled": true,
+    "market": {
+      "type": "futures",
+      "quote_asset": "USDT"
+    },
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "BNBUSDT",
+      "XRPUSDT",
+      "DOGEUSDT",
+      "LINKUSDT",
+      "AVAXUSDT",
+      "ADAUSDT"
+    ],
+    "timeframes": ["5m", "15m", "1h"],
+    "vwap": {
+      "type": "session",
+      "reset_timezone": "UTC",
+      "reset_hour": 0
+    },
+    "rejection": {
+      "minimum_wick_body_ratio": 2.0,
+      "maximum_opposite_wick_body_ratio": 1.0,
+      "allow_doji": false
+    },
+    "volume": {
+      "sma_period": 20,
+      "increasing_candles": 3,
+      "require_above_sma": true
+    },
+    "execution": {
+      "entry_type": "next_candle_open",
+      "stop_loss": "rejection_candle_extreme",
+      "risk_reward": 2.0,
+      "pyramiding": false,
+      "same_candle_exit_priority": "stop_loss",
+      "stop_mode": "signal_extreme"
+    },
+    "risk": {
+      "allow_long": true,
+      "allow_short": true,
+      "max_positions_per_symbol_timeframe": 1,
+      "risk_pct": 0.005,
+      "initial_equity": 10000.0,
+      "leverage": 1.0
+    },
+    "costs": {
+      "fee_per_side": 0.0005,
+      "slippage_per_side": 0.0002,
+      "funding_rate_8h": 0.0001,
+      "funding_label": "estimate"
+    }
+  }
+}

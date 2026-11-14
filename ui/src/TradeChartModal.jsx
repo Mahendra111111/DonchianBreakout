@@ -11,7 +11,8 @@ import { strategyOverlays } from './strategyIndicators'
 
 function barTimeSec(isoOrMs, timeframe) {
   const ms = toMs(isoOrMs)
-  const barMs = timeframe === '15m' ? 15 * 60_000 : 60 * 60_000
+  const barMs =
+    timeframe === '5m' ? 5 * 60_000 : timeframe === '15m' ? 15 * 60_000 : 60 * 60_000
   return Math.floor(ms / barMs) * (barMs / 1000)
 }
 

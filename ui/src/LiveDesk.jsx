@@ -10,7 +10,7 @@ import { fmtTime } from './fmtTime'
 import { subscribeLiveKlines } from './liveSocket'
 import { strategyOverlays } from './strategyIndicators'
 
-const PAPER_POLL_MS = 60_000
+const PAPER_POLL_MS = 1_000
 
 function barTimeSec(isoOrMs, timeframe) {
   const ms = typeof isoOrMs === 'number' ? isoOrMs : Date.parse(isoOrMs)

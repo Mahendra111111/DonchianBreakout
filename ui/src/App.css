@@ -283,6 +283,109 @@ th {
 .row-win { background: rgba(61, 186, 122, 0.06); }
 .row-loss { background: rgba(227, 93, 93, 0.06); }
 
+.trade-row {
+  cursor: pointer;
+}
+
+.trade-row:hover {
+  outline: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  outline-offset: -1px;
+}
+
+.trade-row.selected {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.chart-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(5, 10, 8, 0.72);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.chart-modal {
+  width: min(1100px, 100%);
+  max-height: min(90vh, 820px);
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 16px 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.chart-modal-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.chart-modal-head h2 {
+  margin: 0 0 6px;
+  font-size: 1.05rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.chart-modal-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.chart-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.chart-modal-actions button,
+.tv-link {
+  border: 1px solid var(--line);
+  background: #121916;
+  color: var(--text);
+  border-radius: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: none;
+}
+
+.chart-modal-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tv-link {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+}
+
+.close-btn {
+  border-color: #6a3030 !important;
+}
+
+.chart-host {
+  min-height: 420px;
+  height: min(58vh, 520px);
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #121916;
+}
+
 .stack {
   display: grid;
   gap: 2px;

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
+import { fmtTime } from './fmtTime'
+import TradeChartModal from './TradeChartModal'
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
 const STRATEGIES = ['Donchian Breakout', 'EMA Trend Following', 'Hammer SMA VWAP']
@@ -22,30 +24,6 @@ function fmtPct(n) {
   return `${sign}${v.toFixed(2)}%`
 }
 
-function fmtTime(isoOrMs) {
-  if (isoOrMs == null || isoOrMs === '') return '—'
-  const ms = typeof isoOrMs === 'number' ? isoOrMs : Date.parse(isoOrMs)
-  if (!Number.isFinite(ms)) return String(isoOrMs)
-  const d = new Date(ms)
-  const datePart = new Intl.DateTimeFormat('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(d)
-  const timePart = new Intl.DateTimeFormat('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  })
-    .format(d)
-    .replace(/\s/g, '')
-    .replace(':', '.')
-    .toLowerCase()
-  return `${datePart}, ${timePart} IST`
-}
-
 export default function App() {
   const [symbol, setSymbol] = useState('SOLUSDT')
   const [strategy, setStrategy] = useState('Donchian Breakout')
@@ -63,6 +41,7 @@ export default function App() {
   const [scanBusy, setScanBusy] = useState(false)
   const [scanMsg, setScanMsg] = useState('')
   const [page, setPage] = useState(0)
+  const [selectedIdx, setSelectedIdx] = useState(null)
   const pageSize = 50
 
   useEffect(() => {
@@ -71,6 +50,7 @@ export default function App() {
       setLoading(true)
       setError('')
       setPage(0)
+      setSelectedIdx(null)
       try {
         const qs = new URLSearchParams({ symbol, strategy, timeframe, period })
         const res = await fetch(`/api/results?${qs}`)
@@ -165,6 +145,9 @@ export default function App() {
     () => tradeList.slice(page * pageSize, (page + 1) * pageSize),
     [tradeList, page],
   )
+  const selectedTrade = selectedIdx != null ? tradeList[selectedIdx] : null
+  const canPrev = selectedIdx != null && selectedIdx > 0
+  const canNext = selectedIdx != null && selectedIdx < tradeList.length - 1
 
   return (
     <div className="app">
@@ -281,7 +264,11 @@ export default function App() {
         <div className="table-head">
           <h2>
             Trade records
-            <span>{tradeList.length} in {period}{summary?.from ? ` · ${fmtTime(summary.from)} → ${fmtTime(summary.to)}` : ''}</span>
+            <span>
+              {tradeList.length} in {period}
+              {summary?.from ? ` · ${fmtTime(summary.from)} → ${fmtTime(summary.to)}` : ''}
+              {' · click a row for chart'}
+            </span>
           </h2>
           <div className="pager">
             <button type="button" disabled={page <= 0} onClick={() => setPage((p) => p - 1)}>Prev</button>
@@ -305,9 +292,22 @@ export default function App() {
             <tbody>
               {pageRows.map((t, i) => {
                 const ok = t.outcome === 'successful'
+                const absIdx = page * pageSize + i
                 return (
-                  <tr key={`${t.entry_time}-${i}`} className={ok ? 'row-win' : 'row-loss'}>
-                    <td>{page * pageSize + i + 1}</td>
+                  <tr
+                    key={`${t.entry_time}-${i}`}
+                    className={`${ok ? 'row-win' : 'row-loss'} trade-row${selectedIdx === absIdx ? ' selected' : ''}`}
+                    onClick={() => setSelectedIdx(absIdx)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setSelectedIdx(absIdx)
+                      }
+                    }}
+                    tabIndex={0}
+                    role="button"
+                  >
+                    <td>{absIdx + 1}</td>
                     <td><span className={`side ${t.side === 'LONG' ? 'long' : 'short'}`}>{t.side}</span></td>
                     <td>
                       <div className="stack">
@@ -411,6 +411,19 @@ export default function App() {
             </table>
           </div>
         </section>
+      )}
+
+      {selectedTrade && (
+        <TradeChartModal
+          trade={selectedTrade}
+          symbol={symbol}
+          timeframe={timeframe}
+          tradeIndex={selectedIdx}
+          tradeCount={tradeList.length}
+          onClose={() => setSelectedIdx(null)}
+          onPrev={canPrev ? () => setSelectedIdx((i) => i - 1) : undefined}
+          onNext={canNext ? () => setSelectedIdx((i) => i + 1) : undefined}
+        />
       )}
     </div>
   )

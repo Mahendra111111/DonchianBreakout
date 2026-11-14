@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import threading
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -52,6 +53,36 @@ def _run_node_scan(notify: bool) -> dict:
     )
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or 'scan failed')
+    return json.loads(proc.stdout)
+
+
+def _parse_time_ms(raw: str | None) -> int | None:
+    if raw is None or raw == '':
+        return None
+    try:
+        return int(float(raw))
+    except ValueError:
+        pass
+    try:
+        return int(datetime.fromisoformat(raw.replace('Z', '+00:00')).timestamp() * 1000)
+    except ValueError:
+        return None
+
+
+def _run_node_ohlcv(symbol: str, timeframe: str, from_ms: int, to_ms: int) -> dict:
+    args = [
+        'node', str(ROOT / 'scripts' / 'run_ohlcv.mjs'),
+        f'symbol={symbol}',
+        f'timeframe={timeframe}',
+        f'from={from_ms}',
+        f'to={to_ms}',
+    ]
+    env = os.environ.copy()
+    proc = subprocess.run(
+        args, cwd=str(ROOT), capture_output=True, text=True, env=env, check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or 'ohlcv failed')
     return json.loads(proc.stdout)
 
 
@@ -113,6 +144,20 @@ class Handler(BaseHTTPRequestHandler):
                 with _state_lock:
                     _state['last_scan'] = result
                 self._json(200, result)
+            except Exception as e:
+                self._json(500, {'error': str(e)})
+            return
+
+        if path == '/api/ohlcv':
+            symbol = (qs.get('symbol') or ['SOLUSDT'])[0].upper()
+            timeframe = (qs.get('timeframe') or ['1h'])[0]
+            from_ms = _parse_time_ms((qs.get('from') or [None])[0])
+            to_ms = _parse_time_ms((qs.get('to') or [None])[0])
+            if from_ms is None or to_ms is None:
+                self._json(400, {'error': 'from and to are required (ms or ISO)'})
+                return
+            try:
+                self._json(200, _run_node_ohlcv(symbol, timeframe, from_ms, to_ms))
             except Exception as e:
                 self._json(500, {'error': str(e)})
             return

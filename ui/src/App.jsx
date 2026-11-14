@@ -173,7 +173,7 @@ export default function App() {
     <div className="app">
       <header className="top">
         <div>
-          <p className="eyebrow">EMA + Donchian + Hammer</p>
+          <p className="eyebrow">EMA + Donchian + Hammer + VWAP</p>
           <h1>Strategy Desk</h1>
         </div>
         <div className="controls">

@@ -271,7 +271,8 @@ export default function App() {
     setScanMsg('')
     try {
       setError('')
-      const res = await fetch('/api/scan?notify=1&desk=1')
+      // Desk Scan: refresh last-24h real signals only — no Telegram history flood
+      const res = await fetch('/api/scan?notify=0&desk=1')
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || `Scan ${res.status}`)
       setSignals(data.signals || [])
@@ -281,12 +282,12 @@ export default function App() {
         telegramConfigured: data.telegramConfigured,
         timeframe: data.timeframe,
         recentDays: data.recentDays,
+        recentHours: data.recentHours,
       })
       setScanMsg(
-        data.telegramConfigured
-          ? `Scan done · ${data.recentCount || 0} opportunity record(s) · ${data.notifyCount} Telegram message(s)`
-          : `Scan done · ${data.recentCount || 0} opportunity record(s) · Telegram not configured`,
+        `Last ${data.recentHours || 24}h · ${data.recentCount || 0} real closed-bar signal(s) on ${data.timeframe || '1h'} watchlist · Telegram live alerts via hourly cron (not Scan)`,
       )
+      setTesterTab('signals')
     } catch (e) {
       setError(e.message || 'Scan failed')
       setScanMsg('')
@@ -448,7 +449,7 @@ export default function App() {
               className={testerTab === 'signals' ? 'active' : ''}
               onClick={() => setTesterTab('signals')}
             >
-              Signals
+              Signals ({(recent.length ? recent : signals).length})
             </button>
             {ranking.length > 0 && (
               <button
@@ -695,8 +696,9 @@ export default function App() {
                   {(recent.length ? recent : signals).length === 0 && (
                     <tr>
                       <td colSpan={6} className="empty">
-                        No opportunities
-                        {scanMeta?.telegramConfigured ? '' : ' · Telegram off'}
+                        No real closed-bar signals in the last {scanMeta?.recentHours || 24}h on watchlist
+                        {scanMeta?.timeframe ? ` · ${scanMeta.timeframe}` : ''}
+                        {scanMeta?.telegramConfigured ? ' · Telegram live via hourly cron' : ' · Telegram not configured'}
                       </td>
                     </tr>
                   )}

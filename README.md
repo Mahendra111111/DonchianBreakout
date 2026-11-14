@@ -1,9 +1,10 @@
 # EMA + Donchian crypto desk
 
-Only two strategies ship in this project:
+Strategies in this project:
 
 1. **Donchian Breakout** (20-bar close break of prior high/low)
 2. **EMA Trend Following** (EMA20 / EMA50 cross)
+3. **Hammer SMA VWAP** (hammer/hanging/inverted/shooting-star + SMA200 + session VWAP touch; ATR 1.5 / RR 2.0)
 
 Each research trade uses a **1.5 ATR stop**, **1.5R take-profit**, 0.5% risk, and fee/slip assumptions. Live alerts are **signals only** — this app does not place exchange orders.
 

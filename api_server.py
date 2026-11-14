@@ -14,7 +14,7 @@ HOST = '127.0.0.1'
 PORT = 8765
 ROOT = Path(__file__).resolve().parent
 SUMMARY = ROOT / 'ui' / 'public' / 'strategy_summary.json'
-STRATEGIES = ('EMA Trend Following', 'Donchian Breakout')
+STRATEGIES = ('EMA Trend Following', 'Donchian Breakout', 'Hammer SMA VWAP')
 SYMBOLS = ('BTCUSDT', 'ETHUSDT', 'SOLUSDT')
 
 _state_lock = threading.Lock()

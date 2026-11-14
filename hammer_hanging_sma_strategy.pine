@@ -1,0 +1,155 @@
+//@version=6
+// =============================================================================
+// KEEP IN SYNC WITH: src/strategy/hammer_vwap_ma.py + src/indicators/sma.py
+// =============================================================================
+// Rules (must match Python backtester):
+//   1) Pattern: hammer OR hanging man OR inverted hammer OR shooting star
+//   2) SMA filter: close > SMA(len) => buy only; close < SMA(len) => sell only
+//      SMA = ta.sma(source, len) - mean of current bar + previous (len-1) bars
+//   3) Candle touches session VWAP: low <= VWAP <= high
+//   4) ATR stop / target on entry (optional)
+// =============================================================================
+
+strategy(
+     "Hammer/Hanging Man + SMA + VWAP",
+     overlay=true,
+     margin_long=100,
+     margin_short=100,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10)
+
+// ============================================================================
+// INPUTS (defaults match StrategyParams in hammer_vwap_ma.py)
+// ============================================================================
+grpTrend = "Trend filter - SMA"
+smaLen         = input.int(200, "SMA length", minval=1, group=grpTrend)
+smaSourceInput = input.string("close", "SMA source", options=["close", "open", "high", "low", "hl2", "hlc3", "ohlc4"], group=grpTrend)
+showSMA        = input.bool(true, "Show SMA on chart", group=grpTrend)
+smaColor       = input.color(color.new(#FF6600, 0), "SMA color", group=grpTrend)
+smaWidth       = input.int(3, "SMA line width", minval=1, maxval=6, group=grpTrend)
+
+grpVwap = "VWAP filter"
+showVWAP  = input.bool(true, "Show VWAP on chart", group=grpVwap)
+vwapColor = input.color(color.new(#2962FF, 0), "VWAP color", group=grpVwap)
+vwapWidth = input.int(2, "VWAP line width", minval=1, maxval=6, group=grpVwap)
+
+grpRisk = "Risk management"
+useRisk   = input.bool(true, "Use ATR stop / target", group=grpRisk)
+atrLen    = input.int(14, "ATR length", group=grpRisk)
+atrSLMult = input.float(1.5, "Stop loss (x ATR)", step=0.1, group=grpRisk)
+rrRatio   = input.float(2.0, "Reward:Risk ratio", step=0.1, group=grpRisk)
+
+showLabels   = input.bool(true, "Show signal labels")
+showPatterns = input.bool(true, "Show raw pattern markers (no SMA/VWAP filter)")
+
+// ============================================================================
+// SMA - TradingView built-in indicator logic (src/indicators/sma.py)
+//   out = ta.sma(src, len)
+// ============================================================================
+resolveSmaSource(string srcName) =>
+    switch srcName
+        "close" => close
+        "open"  => open
+        "high"  => high
+        "low"   => low
+        "hl2"   => hl2
+        "hlc3"  => hlc3
+        "ohlc4" => ohlc4
+        => close
+
+smaSrc = resolveSmaSource(smaSourceInput)
+sma200 = ta.sma(smaSrc, smaLen)
+
+plot(showSMA ? sma200 : na, title="SMA", color=smaColor, linewidth=smaWidth, style=plot.style_line, display=display.all, trackprice=true, editable=true)
+
+// ============================================================================
+// Session VWAP - resets each trading day (Python: _session_vwap, typical = HLC3)
+// ============================================================================
+vwap = ta.vwap(hlc3)
+
+plot(showVWAP ? vwap : na, title="VWAP", color=vwapColor, linewidth=vwapWidth, style=plot.style_line, display=display.all, trackprice=true, editable=true)
+
+// ============================================================================
+// Trend + VWAP touch (Python: above_ma, below_ma, touches_vwap)
+// ============================================================================
+aboveSMA = close > sma200
+belowSMA = close < sma200
+smaReady = not na(sma200)
+
+touchesVwap = not na(vwap) and low <= vwap and high >= vwap
+
+// ============================================================================
+// Patterns - visual rules (synced with src/strategy/candle_patterns.py)
+// Small shadow limit: max(50% of body, 12% of range)
+// ============================================================================
+body   = math.abs(close - open)
+range_ = high - low
+upWick = high - math.max(close, open)
+dnWick = math.min(close, open) - low
+
+smallUpper = upWick <= math.max(body * 0.5, range_ * 0.12)
+smallLower = dnWick <= math.max(body * 0.5, range_ * 0.12)
+
+hammerShape = range_ > 0 and body > 0 and dnWick >= 2.0 * body and smallUpper
+invShape    = range_ > 0 and body > 0 and upWick >= 2.0 * body and smallLower
+
+isHammer         = hammerShape
+isHangingMan     = hammerShape and close < close[1]
+isInvertedHammer = invShape
+isShootingStar   = invShape and close < close[1]
+
+isPattern = isHammer or isHangingMan or isInvertedHammer or isShootingStar
+
+patternName() =>
+    string n = ""
+    if isHammer
+        n := n + "Hammer "
+    if isHangingMan
+        n := n + "HangMan "
+    if isInvertedHammer
+        n := n + "InvHammer "
+    if isShootingStar
+        n := n + "ShootStar "
+    str.trim(n)
+
+// ============================================================================
+// Qualified signals (Python: qualified_buy, qualified_sell)
+// ============================================================================
+buySignal  = isPattern and aboveSMA and smaReady and touchesVwap
+sellSignal = isPattern and belowSMA and smaReady and touchesVwap
+
+plotshape(showPatterns and isHammer, title="Hammer", style=shape.diamond, location=location.belowbar, color=color.new(color.orange, 0), size=size.tiny, text="H")
+plotshape(showPatterns and isHangingMan, title="Hanging Man", style=shape.diamond, location=location.abovebar, color=color.new(color.purple, 0), size=size.tiny, text="HM")
+plotshape(showPatterns and isInvertedHammer, title="Inverted Hammer", style=shape.diamond, location=location.belowbar, color=color.new(color.teal, 0), size=size.tiny, text="IH")
+plotshape(showPatterns and isShootingStar, title="Shooting Star", style=shape.diamond, location=location.abovebar, color=color.new(color.maroon, 0), size=size.tiny, text="SS")
+
+plotshape(buySignal, title="Buy", style=shape.labelup, location=location.belowbar, color=color.green, textcolor=color.white, text="BUY", size=size.small)
+plotshape(sellSignal, title="Sell", style=shape.labeldown, location=location.abovebar, color=color.red, textcolor=color.white, text="SELL", size=size.small)
+
+if showLabels and buySignal
+    label.new(bar_index, low, "BUY\n" + patternName() + "\nVWAP touch", style=label.style_label_up, color=color.green, textcolor=color.white, size=size.tiny)
+if showLabels and sellSignal
+    label.new(bar_index, high, "SELL\n" + patternName() + "\nVWAP touch", style=label.style_label_down, color=color.red, textcolor=color.white, size=size.tiny)
+
+// ============================================================================
+// Strategy execution - ATR SL/TP (alert() works in strategies)
+// ============================================================================
+atrVal = ta.atr(atrLen)
+
+if buySignal
+    alert("BUY: " + patternName() + " | above SMA + VWAP touch", alert.freq_once_per_bar_close)
+    strategy.close("Short")
+    strategy.entry("Long", strategy.long)
+    if useRisk
+        slPrice = close - atrVal * atrSLMult
+        tpPrice = close + atrVal * atrSLMult * rrRatio
+        strategy.exit("Long Exit", "Long", stop=slPrice, limit=tpPrice)
+
+if sellSignal
+    alert("SELL: " + patternName() + " | below SMA + VWAP touch", alert.freq_once_per_bar_close)
+    strategy.close("Long")
+    strategy.entry("Short", strategy.short)
+    if useRisk
+        slPrice = close + atrVal * atrSLMult
+        tpPrice = close - atrVal * atrSLMult * rrRatio
+        strategy.exit("Short Exit", "Short", stop=slPrice, limit=tpPrice)

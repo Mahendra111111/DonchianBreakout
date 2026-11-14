@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import './App.css'
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
-const STRATEGIES = ['Donchian Breakout', 'EMA Trend Following']
+const STRATEGIES = ['Donchian Breakout', 'EMA Trend Following', 'Hammer SMA VWAP']
 const TIMEFRAMES = ['1h', '15m']
 
 function fmtPct(n) {
@@ -110,7 +110,7 @@ export default function App() {
     <div className="app">
       <header className="top">
         <div>
-          <p className="eyebrow">EMA + Donchian</p>
+          <p className="eyebrow">EMA + Donchian + Hammer</p>
           <h1>Strategy Desk</h1>
         </div>
         <div className="controls">

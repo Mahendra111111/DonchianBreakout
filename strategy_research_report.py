@@ -151,9 +151,47 @@ def signals_donchian(df: pd.DataFrame, n: int = 20):
     return long_e.fillna(False), short_e.fillna(False), short_e.fillna(False), long_e.fillna(False)
 
 
+def signals_hammer_sma_vwap(df: pd.DataFrame, sma_len: int = 200):
+    """Pine: Hammer/Hanging Man + SMA + session VWAP touch."""
+    body = (df.close - df.open).abs()
+    range_ = (df.high - df.low).replace(0, np.nan)
+    up_wick = df.high - df[['close', 'open']].max(axis=1)
+    dn_wick = df[['close', 'open']].min(axis=1) - df.low
+    small_upper = up_wick <= np.maximum(body * 0.5, range_ * 0.12)
+    small_lower = dn_wick <= np.maximum(body * 0.5, range_ * 0.12)
+    hammer_shape = (range_ > 0) & (body > 0) & (dn_wick >= 2.0 * body) & small_upper
+    inv_shape = (range_ > 0) & (body > 0) & (up_wick >= 2.0 * body) & small_lower
+    is_pattern = hammer_shape | inv_shape
+
+    sma = df.close.rolling(sma_len).mean()
+    above = df.close > sma
+    below = df.close < sma
+    sma_ready = sma.notna()
+
+    day = df.index.floor('D')
+    typical = (df.high + df.low + df.close) / 3.0
+    cum_pv = (typical * df.volume).groupby(day).cumsum()
+    cum_v = df.volume.groupby(day).cumsum().replace(0, np.nan)
+    vwap = cum_pv / cum_v
+    touches = vwap.notna() & (df.low <= vwap) & (df.high >= vwap)
+
+    long_e = is_pattern & above & sma_ready & touches
+    short_e = is_pattern & below & sma_ready & touches
+    # Opposite qualified signal closes the trade (matches Pine strategy.close)
+    return long_e.fillna(False), short_e.fillna(False), short_e.fillna(False), long_e.fillna(False)
+
+
 STRATEGIES = {
     'EMA Trend Following': signals_ema_trend,
     'Donchian Breakout': signals_donchian,
+    'Hammer SMA VWAP': signals_hammer_sma_vwap,
+}
+
+# Pine defaults: ATR stop 1.5, RR 2.0 for hammer; others keep 1.5R
+STRATEGY_RR = {
+    'EMA Trend Following': 1.5,
+    'Donchian Breakout': 1.5,
+    'Hammer SMA VWAP': 2.0,
 }
 
 
@@ -166,6 +204,7 @@ def main():
             print(f'Backtesting {sym} {tf}…', flush=True)
             for name, fn in STRATEGIES.items():
                 le, se, lx, sx = fn(df)
+                rr = STRATEGY_RR.get(name, 1.5)
                 metrics = run_signal_backtest(
                     df,
                     le.reindex(df.index).fillna(False),
@@ -173,7 +212,7 @@ def main():
                     lx.reindex(df.index).fillna(False),
                     sx.reindex(df.index).fillna(False),
                     stop_atr=1.5,
-                    rr=1.5,
+                    rr=rr,
                 )
                 strategy_rows.append({'strategy': name, 'symbol': sym, 'timeframe': tf, **metrics})
 

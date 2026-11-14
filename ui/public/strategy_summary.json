@@ -1,9 +1,26 @@
 {
   "strategies": [
+    "EMA Trend Following",
     "Donchian Breakout",
-    "EMA Trend Following"
+    "Hammer SMA VWAP"
   ],
   "ranking": [
+    {
+      "strategy": "Hammer SMA VWAP",
+      "avg_net_return_pct_15m": -77.22446124988717,
+      "avg_net_return_pct_1h": -36.76973967011271,
+      "avg_win_rate_15m": 33.732229126270056,
+      "avg_win_rate_1h": 32.93490992187404,
+      "avg_trades_15m": 2007.3333333333333,
+      "avg_pf_1h": 0.8400997459909035,
+      "best_cell": {
+        "symbol": "SOLUSDT",
+        "timeframe": "1h",
+        "net_return_pct": -15.666856433438136,
+        "win_rate_pct": 34.35960591133005,
+        "trades": 812
+      }
+    },
     {
       "strategy": "Donchian Breakout",
       "avg_net_return_pct_15m": -99.65503198466261,
@@ -65,6 +82,19 @@
       "stop_exit_pct": 58.29063332650133
     },
     {
+      "strategy": "Hammer SMA VWAP",
+      "symbol": "BTCUSDT",
+      "timeframe": "15m",
+      "trades": 2080,
+      "win_rate_pct": 33.84615384615385,
+      "net_return_pct": -86.25509226698723,
+      "profit_factor": 0.739052294279331,
+      "max_dd_pct": 86.52387738493982,
+      "expectancy": -4.146879435912868,
+      "final_equity": 1374.4907733012765,
+      "stop_exit_pct": 64.90384615384616
+    },
+    {
       "strategy": "EMA Trend Following",
       "symbol": "ETHUSDT",
       "timeframe": "15m",
@@ -89,6 +119,19 @@
       "expectancy": -1.0509837315794994,
       "final_equity": 13.552582531589652,
       "stop_exit_pct": 56.882761523889705
+    },
+    {
+      "strategy": "Hammer SMA VWAP",
+      "symbol": "ETHUSDT",
+      "timeframe": "15m",
+      "trades": 2042,
+      "win_rate_pct": 31.929480901077373,
+      "net_return_pct": -89.82889593568537,
+      "profit_factor": 0.7114337792751139,
+      "max_dd_pct": 90.25309776975581,
+      "expectancy": -4.399064443471368,
+      "final_equity": 1017.1104064314642,
+      "stop_exit_pct": 66.89520078354553
     },
     {
       "strategy": "EMA Trend Following",
@@ -117,6 +160,19 @@
       "stop_exit_pct": 56.36955235653717
     },
     {
+      "strategy": "Hammer SMA VWAP",
+      "symbol": "SOLUSDT",
+      "timeframe": "15m",
+      "trades": 1900,
+      "win_rate_pct": 35.421052631578945,
+      "net_return_pct": -55.58939554698894,
+      "profit_factor": 0.9017079707592869,
+      "max_dd_pct": 63.772562132906984,
+      "expectancy": -2.925757660367845,
+      "final_equity": 4441.060445301106,
+      "stop_exit_pct": 64.05263157894737
+    },
+    {
       "strategy": "EMA Trend Following",
       "symbol": "BTCUSDT",
       "timeframe": "1h",
@@ -141,6 +197,19 @@
       "expectancy": -2.164053599057032,
       "final_equity": 4836.568112649969,
       "stop_exit_pct": 55.238893545683155
+    },
+    {
+      "strategy": "Hammer SMA VWAP",
+      "symbol": "BTCUSDT",
+      "timeframe": "1h",
+      "trades": 885,
+      "win_rate_pct": 31.412429378531076,
+      "net_return_pct": -57.390782806647714,
+      "profit_factor": 0.7348145502022534,
+      "max_dd_pct": 57.39078280664776,
+      "expectancy": -6.4848342154404275,
+      "final_equity": 4260.92171933523,
+      "stop_exit_pct": 67.79661016949152
     },
     {
       "strategy": "EMA Trend Following",
@@ -169,6 +238,19 @@
       "stop_exit_pct": 56.634167019923694
     },
     {
+      "strategy": "Hammer SMA VWAP",
+      "symbol": "ETHUSDT",
+      "timeframe": "1h",
+      "trades": 887,
+      "win_rate_pct": 33.03269447576099,
+      "net_return_pct": -37.251579770252285,
+      "profit_factor": 0.8462074933303112,
+      "max_dd_pct": 39.563256575998565,
+      "expectancy": -4.199727144335052,
+      "final_equity": 6274.842022974772,
+      "stop_exit_pct": 65.83990980834274
+    },
+    {
       "strategy": "EMA Trend Following",
       "symbol": "SOLUSDT",
       "timeframe": "1h",
@@ -193,7 +275,20 @@
       "expectancy": 1.5144180662459268,
       "final_equity": 13792.102837879705,
       "stop_exit_pct": 54.55271565495208
+    },
+    {
+      "strategy": "Hammer SMA VWAP",
+      "symbol": "SOLUSDT",
+      "timeframe": "1h",
+      "trades": 812,
+      "win_rate_pct": 34.35960591133005,
+      "net_return_pct": -15.666856433438136,
+      "profit_factor": 0.9392771944401457,
+      "max_dd_pct": 21.330338063165705,
+      "expectancy": -1.9294158169258737,
+      "final_equity": 8433.314356656187,
+      "stop_exit_pct": 65.51724137931035
     }
   ],
-  "updated": "2026-11-14T06:47:49.788919+00:00"
+  "updated": "2026-11-14T08:37:52.594906+00:00"
 }

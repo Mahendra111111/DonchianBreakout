@@ -2,9 +2,12 @@
   "name": "crypto-ema-donchian",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "ui"
+  ],
   "scripts": {
-    "build": "npm --prefix ui install && npm --prefix ui run build",
-    "dev": "npm --prefix ui run dev",
+    "build": "npm run build -w ui",
+    "dev": "npm run dev -w ui",
     "scan": "node scripts/run_scan.mjs",
     "research": "python -u strategy_research_report.py"
   }

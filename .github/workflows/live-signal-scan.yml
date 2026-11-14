@@ -6,8 +6,8 @@ name: Live signal scan
 
 on:
   schedule:
-    # ~5 minutes past each hour (after typical 1h candle close)
-    - cron: '5 * * * *'
+    # Every 15m (Hobby Vercel can't) — catch 1h closes within ~5–15 minutes, not 1–2h late
+    - cron: '5,20,35,50 * * * *'
   workflow_dispatch:
 
 jobs:

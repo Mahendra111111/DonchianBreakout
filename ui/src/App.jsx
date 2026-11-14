@@ -283,9 +283,9 @@ export default function App() {
     }
     pollList()
     const listTimer = setInterval(pollList, 60_000)
-    const liveTimer = setInterval(pollLiveNotify, 3 * 60_000)
-    // First live check shortly after open (not immediate flood)
-    const firstLive = setTimeout(pollLiveNotify, 15_000)
+    // Poll often while desk is open so Telegram fires minutes after bar close, not hours later
+    const liveTimer = setInterval(pollLiveNotify, 60_000)
+    const firstLive = setTimeout(pollLiveNotify, 8_000)
     return () => {
       cancelled = true
       clearInterval(listTimer)

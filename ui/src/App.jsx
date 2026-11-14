@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { fmtTime } from './fmtTime'
+import LiveDesk from './LiveDesk'
 import TradeChartModal from './TradeChartModal'
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
@@ -42,6 +43,7 @@ export default function App() {
   const [scanMsg, setScanMsg] = useState('')
   const [page, setPage] = useState(0)
   const [selectedIdx, setSelectedIdx] = useState(null)
+  const [selectedLiveTrade, setSelectedLiveTrade] = useState(null)
   const pageSize = 50
 
   useEffect(() => {
@@ -51,6 +53,7 @@ export default function App() {
       setError('')
       setPage(0)
       setSelectedIdx(null)
+      setSelectedLiveTrade(null)
       try {
         const qs = new URLSearchParams({ symbol, strategy, timeframe, period })
         const res = await fetch(`/api/results?${qs}`)
@@ -145,9 +148,11 @@ export default function App() {
     () => tradeList.slice(page * pageSize, (page + 1) * pageSize),
     [tradeList, page],
   )
-  const selectedTrade = selectedIdx != null ? tradeList[selectedIdx] : null
-  const canPrev = selectedIdx != null && selectedIdx > 0
-  const canNext = selectedIdx != null && selectedIdx < tradeList.length - 1
+  const selectedTrade = selectedLiveTrade || (selectedIdx != null ? tradeList[selectedIdx] : null)
+  const canPrev = !selectedLiveTrade && selectedIdx != null && selectedIdx > 0
+  const canNext = !selectedLiveTrade && selectedIdx != null && selectedIdx < tradeList.length - 1
+  const chartTradeIndex = selectedLiveTrade ? 0 : (selectedIdx ?? 0)
+  const chartTradeCount = selectedLiveTrade ? 1 : tradeList.length
 
   return (
     <div className="app">
@@ -198,6 +203,16 @@ export default function App() {
       {error && <div className="banner error">{error}</div>}
       {loading && !summary && !error && <div className="banner">Loading research…</div>}
       {scanMsg && <div className="banner">{scanMsg}</div>}
+
+      <LiveDesk
+        symbol={symbol}
+        timeframe={timeframe}
+        strategy={strategy}
+        onSelectTrade={(t) => {
+          setSelectedIdx(null)
+          setSelectedLiveTrade(t)
+        }}
+      />
 
       {Object.keys(periodCards).length > 0 && (
         <section className="period-grid">
@@ -297,10 +312,14 @@ export default function App() {
                   <tr
                     key={`${t.entry_time}-${i}`}
                     className={`${ok ? 'row-win' : 'row-loss'} trade-row${selectedIdx === absIdx ? ' selected' : ''}`}
-                    onClick={() => setSelectedIdx(absIdx)}
+                    onClick={() => {
+                      setSelectedLiveTrade(null)
+                      setSelectedIdx(absIdx)
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault()
+                        setSelectedLiveTrade(null)
                         setSelectedIdx(absIdx)
                       }
                     }}
@@ -419,9 +438,12 @@ export default function App() {
           symbol={symbol}
           timeframe={timeframe}
           strategy={strategy}
-          tradeIndex={selectedIdx}
-          tradeCount={tradeList.length}
-          onClose={() => setSelectedIdx(null)}
+          tradeIndex={chartTradeIndex}
+          tradeCount={chartTradeCount}
+          onClose={() => {
+            setSelectedIdx(null)
+            setSelectedLiveTrade(null)
+          }}
           onPrev={canPrev ? () => setSelectedIdx((i) => i - 1) : undefined}
           onNext={canNext ? () => setSelectedIdx((i) => i + 1) : undefined}
         />

@@ -86,6 +86,22 @@ def _run_node_ohlcv(symbol: str, timeframe: str, from_ms: int, to_ms: int) -> di
     return json.loads(proc.stdout)
 
 
+def _run_node_live(symbol: str, timeframe: str, strategy: str) -> dict:
+    args = [
+        'node', str(ROOT / 'scripts' / 'run_live.mjs'),
+        f'symbol={symbol}',
+        f'timeframe={timeframe}',
+        f'strategy={strategy}',
+    ]
+    env = os.environ.copy()
+    proc = subprocess.run(
+        args, cwd=str(ROOT), capture_output=True, text=True, env=env, check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or 'live failed')
+    return json.loads(proc.stdout)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         print(f'[api] {self.address_string()} - {fmt % args}', flush=True)
@@ -144,6 +160,16 @@ class Handler(BaseHTTPRequestHandler):
                 with _state_lock:
                     _state['last_scan'] = result
                 self._json(200, result)
+            except Exception as e:
+                self._json(500, {'error': str(e)})
+            return
+
+        if path == '/api/live':
+            symbol = (qs.get('symbol') or ['SOLUSDT'])[0].upper()
+            timeframe = (qs.get('timeframe') or ['1h'])[0]
+            strategy = (qs.get('strategy') or ['Donchian Breakout'])[0]
+            try:
+                self._json(200, _run_node_live(symbol, timeframe, strategy))
             except Exception as e:
                 self._json(500, {'error': str(e)})
             return

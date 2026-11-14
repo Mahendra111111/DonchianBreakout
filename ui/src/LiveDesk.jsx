@@ -7,9 +7,10 @@ import {
   LineSeries,
 } from 'lightweight-charts'
 import { fmtTime } from './fmtTime'
+import { subscribeLiveKlines } from './liveSocket'
 import { strategyOverlays } from './strategyIndicators'
 
-const POLL_MS = 60_000
+const PAPER_POLL_MS = 60_000
 
 function barTimeSec(isoOrMs, timeframe) {
   const ms = typeof isoOrMs === 'number' ? isoOrMs : Date.parse(isoOrMs)
@@ -19,13 +20,109 @@ function barTimeSec(isoOrMs, timeframe) {
 
 export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade }) {
   const hostRef = useRef(null)
-  const [data, setData] = useState(null)
+  const chartRef = useRef(null)
+  const candleSeriesRef = useRef(null)
+  const overlaySeriesRef = useRef([])
+  const markersApiRef = useRef(null)
+  const priceLinesRef = useRef([])
+  const candlesRef = useRef([])
+
+  const [paper, setPaper] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [stream, setStream] = useState({ connected: false, source: null })
+  const [lastPrice, setLastPrice] = useState(null)
+  const [tickAt, setTickAt] = useState(null)
   const knownClosed = useRef(new Set())
   const [freshNote, setFreshNote] = useState('')
 
-  async function load() {
+  function clearPriceLines() {
+    const series = candleSeriesRef.current
+    if (!series) return
+    for (const line of priceLinesRef.current) {
+      try { series.removePriceLine(line) } catch { /* */ }
+    }
+    priceLinesRef.current = []
+  }
+
+  function applyOverlays(candles) {
+    const chart = chartRef.current
+    if (!chart) return
+    for (const s of overlaySeriesRef.current) {
+      try { chart.removeSeries(s) } catch { /* */ }
+    }
+    overlaySeriesRef.current = []
+    const overlays = strategyOverlays(strategy, candles)
+    for (const line of overlays.lines) {
+      if (!line.data.length) continue
+      const ls = chart.addSeries(LineSeries, {
+        color: line.color,
+        lineWidth: 2,
+        title: line.title,
+        lastValueVisible: true,
+        priceLineVisible: false,
+      })
+      ls.setData(line.data)
+      overlaySeriesRef.current.push(ls)
+    }
+  }
+
+  function applyPaperMarkers(body) {
+    const series = candleSeriesRef.current
+    if (!series) return
+    clearPriceLines()
+    if (markersApiRef.current) {
+      try { markersApiRef.current.setMarkers([]) } catch { /* */ }
+    }
+    const markers = []
+    for (const t of (body.trade_list || []).slice(-40)) {
+      const long = t.side === 'LONG'
+      const ok = t.outcome === 'successful'
+      markers.push({
+        time: barTimeSec(t.entry_time, timeframe),
+        position: long ? 'belowBar' : 'aboveBar',
+        color: long ? '#4aa3ff' : '#d4a017',
+        shape: long ? 'arrowUp' : 'arrowDown',
+        text: 'IN',
+      })
+      markers.push({
+        time: barTimeSec(t.exit_time, timeframe),
+        position: ok ? 'aboveBar' : 'belowBar',
+        color: ok ? '#3dba7a' : '#e35d5d',
+        shape: 'circle',
+        text: t.reason,
+      })
+    }
+    markersApiRef.current = createSeriesMarkers(series, markers)
+
+    if (body.open) {
+      priceLinesRef.current = [
+        series.createPriceLine({
+          price: Number(body.open.entry),
+          color: body.open.side === 'LONG' ? '#4aa3ff' : '#d4a017',
+          lineWidth: 2,
+          lineStyle: 0,
+          title: `Open ${body.open.side}`,
+        }),
+        series.createPriceLine({
+          price: Number(body.open.stop),
+          color: '#e35d5d',
+          lineWidth: 1,
+          lineStyle: 2,
+          title: 'Stop',
+        }),
+        series.createPriceLine({
+          price: Number(body.open.target),
+          color: '#3dba7a',
+          lineWidth: 1,
+          lineStyle: 2,
+          title: 'Target',
+        }),
+      ]
+    }
+  }
+
+  async function loadPaper({ seedChart } = { seedChart: false }) {
     setBusy(true)
     try {
       const qs = new URLSearchParams({ symbol, timeframe, strategy })
@@ -46,8 +143,30 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
         )
       }
 
-      setData(body)
+      setPaper(body)
       setError('')
+
+      const series = candleSeriesRef.current
+      if (seedChart && series && body.candles?.length) {
+        const candles = body.candles.map(({ time, open, high, low, close, volume }) => ({
+          time, open, high, low, close, volume: volume ?? 0,
+        }))
+        candlesRef.current = candles
+        series.setData(candles.map(({ time, open, high, low, close }) => ({
+          time, open, high, low, close,
+        })))
+        applyOverlays(candles)
+        applyPaperMarkers(body)
+        chartRef.current?.timeScale().scrollToRealTime()
+        const last = candles.at(-1)
+        if (last) {
+          setLastPrice(last.close)
+          setTickAt(Date.now())
+        }
+      } else if (series) {
+        applyOverlays(candlesRef.current)
+        applyPaperMarkers(body)
+      }
     } catch (e) {
       setError(e.message || 'Live feed failed')
     } finally {
@@ -55,21 +174,11 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
     }
   }
 
+  // Create chart once per symbol/tf; keep it alive for WS updates
   useEffect(() => {
-    knownClosed.current = new Set()
-    setFreshNote('')
-    load()
-    const t = setInterval(load, POLL_MS)
-    return () => clearInterval(t)
-  }, [symbol, timeframe, strategy])
-
-  useEffect(() => {
-    if (!data?.candles?.length || !hostRef.current) return undefined
-    let chart
-    let resizeObs
-
+    if (!hostRef.current) return undefined
     hostRef.current.replaceChildren()
-    chart = createChart(hostRef.current, {
+    const chart = createChart(hostRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: '#121916' },
         textColor: '#8fa297',
@@ -79,11 +188,15 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
         horzLines: { color: '#2a3830' },
       },
       rightPriceScale: { borderColor: '#2a3830' },
-      timeScale: { borderColor: '#2a3830', timeVisible: true, secondsVisible: false },
+      timeScale: {
+        borderColor: '#2a3830',
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 6,
+      },
       width: hostRef.current.clientWidth,
       height: hostRef.current.clientHeight || 420,
     })
-
     const series = chart.addSeries(CandlestickSeries, {
       upColor: '#3dba7a',
       downColor: '#e35d5d',
@@ -91,72 +204,16 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
       wickUpColor: '#3dba7a',
       wickDownColor: '#e35d5d',
     })
-    const candles = data.candles.map(({ time, open, high, low, close }) => ({
-      time, open, high, low, close,
-    }))
-    series.setData(candles)
+    chartRef.current = chart
+    candleSeriesRef.current = series
+    overlaySeriesRef.current = []
+    markersApiRef.current = null
+    priceLinesRef.current = []
+    candlesRef.current = []
 
-    const overlays = strategyOverlays(strategy, data.candles)
-    for (const line of overlays.lines) {
-      if (!line.data.length) continue
-      chart.addSeries(LineSeries, {
-        color: line.color,
-        lineWidth: 2,
-        title: line.title,
-        lastValueVisible: true,
-        priceLineVisible: false,
-      }).setData(line.data)
-    }
-
-    const markers = []
-    for (const t of (data.trade_list || []).slice(-40)) {
-      const long = t.side === 'LONG'
-      const ok = t.outcome === 'successful'
-      markers.push({
-        time: barTimeSec(t.entry_time, timeframe),
-        position: long ? 'belowBar' : 'aboveBar',
-        color: long ? '#4aa3ff' : '#d4a017',
-        shape: long ? 'arrowUp' : 'arrowDown',
-        text: 'IN',
-      })
-      markers.push({
-        time: barTimeSec(t.exit_time, timeframe),
-        position: ok ? 'aboveBar' : 'belowBar',
-        color: ok ? '#3dba7a' : '#e35d5d',
-        shape: 'circle',
-        text: t.reason,
-      })
-    }
-    if (markers.length) createSeriesMarkers(series, markers)
-
-    if (data.open) {
-      series.createPriceLine({
-        price: Number(data.open.entry),
-        color: data.open.side === 'LONG' ? '#4aa3ff' : '#d4a017',
-        lineWidth: 2,
-        lineStyle: 0,
-        title: `Open ${data.open.side}`,
-      })
-      series.createPriceLine({
-        price: Number(data.open.stop),
-        color: '#e35d5d',
-        lineWidth: 1,
-        lineStyle: 2,
-        title: 'Stop',
-      })
-      series.createPriceLine({
-        price: Number(data.open.target),
-        color: '#3dba7a',
-        lineWidth: 1,
-        lineStyle: 2,
-        title: 'Target',
-      })
-    }
-
-    chart.timeScale().fitContent()
-    resizeObs = new ResizeObserver(() => {
-      if (!hostRef.current || !chart) return
-      chart.applyOptions({
+    const resizeObs = new ResizeObserver(() => {
+      if (!hostRef.current || !chartRef.current) return
+      chartRef.current.applyOptions({
         width: hostRef.current.clientWidth,
         height: hostRef.current.clientHeight || 420,
       })
@@ -164,14 +221,64 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
     resizeObs.observe(hostRef.current)
 
     return () => {
-      resizeObs?.disconnect()
-      chart?.remove()
+      resizeObs.disconnect()
+      clearPriceLines()
+      chart.remove()
+      chartRef.current = null
+      candleSeriesRef.current = null
     }
-  }, [data, strategy, timeframe])
+  }, [symbol, timeframe])
 
-  const trades = data?.trade_list || []
-  const open = data?.open
-  const summary = data?.summary
+  // Seed history + paper poll (does not rebuild chart)
+  useEffect(() => {
+    knownClosed.current = new Set()
+    setFreshNote('')
+    loadPaper({ seedChart: true })
+    const t = setInterval(() => loadPaper({ seedChart: false }), PAPER_POLL_MS)
+    return () => clearInterval(t)
+  }, [symbol, timeframe, strategy])
+
+  // Continuous WebSocket candle / price updates
+  useEffect(() => {
+    const disconnect = subscribeLiveKlines(
+      symbol,
+      timeframe,
+      (candle) => {
+        const series = candleSeriesRef.current
+        if (!series) return
+        const bar = {
+          time: candle.time,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+        }
+        series.update(bar)
+        setLastPrice(candle.close)
+        setTickAt(Date.now())
+
+        const list = candlesRef.current
+        const last = list[list.length - 1]
+        if (last && last.time === candle.time) {
+          list[list.length - 1] = { ...bar, volume: candle.volume }
+        } else if (!last || candle.time > last.time) {
+          list.push({ ...bar, volume: candle.volume })
+          if (list.length > 600) list.shift()
+        }
+        // Keep chart pinned to live edge while streaming
+        chartRef.current?.timeScale().scrollToRealTime()
+      },
+      (st) => setStream(st),
+    )
+    return disconnect
+  }, [symbol, timeframe])
+
+  const trades = paper?.trade_list || []
+  const open = paper?.open
+  const summary = paper?.summary
+  const streamLabel = stream.connected
+    ? `live WS · ${stream.source}`
+    : 'connecting WS…'
 
   return (
     <section className="live-desk table-wrap">
@@ -179,12 +286,13 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
         <h2>
           Live paper desk
           <span>
-            auto-refresh 60s · {data?.source || '…'}
-            {data?.scannedAt ? ` · ${fmtTime(data.scannedAt)}` : ''}
-            {busy ? ' · updating…' : ''}
+            {streamLabel}
+            {lastPrice != null ? ` · ${Number(lastPrice).toFixed(4)}` : ''}
+            {tickAt ? ` · tick ${fmtTime(tickAt)}` : ''}
+            {busy ? ' · paper sync…' : ''}
           </span>
         </h2>
-        <button type="button" className="scan-btn" disabled={busy} onClick={load}>
+        <button type="button" className="scan-btn" disabled={busy} onClick={() => loadPaper({ seedChart: true })}>
           Refresh live
         </button>
       </div>
@@ -192,11 +300,15 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
       {error && <div className="banner error">{error}</div>}
       {freshNote && <div className="banner">{freshNote}</div>}
       <div className="banner">
-        Paper only — fetches live candles, auto-records strategy entries/exits (stop / target / signal). No exchange orders.
+        Chart streams live candle ticks (WebSocket). Paper trades sync every 60s. No exchange orders.
       </div>
 
       {summary && (
         <div className="stats live-stats">
+          <article>
+            <span>Last price</span>
+            <strong className="live-price">{lastPrice != null ? Number(lastPrice).toFixed(4) : '—'}</strong>
+          </article>
           <article>
             <span>Live window trades</span>
             <strong>{summary.trades}</strong>

@@ -418,6 +418,11 @@ th {
   max-height: 40vh;
 }
 
+.live-price {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
 .stack {
   display: grid;
   gap: 2px;

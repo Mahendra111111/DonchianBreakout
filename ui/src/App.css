@@ -423,6 +423,10 @@ th {
   letter-spacing: 0.02em;
 }
 
+.live-price.live-on {
+  color: var(--accent);
+}
+
 .stack {
   display: grid;
   gap: 2px;

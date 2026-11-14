@@ -1,53 +1,49 @@
-/** Browser WebSocket to public futures kline streams (Binance → Bybit). */
+/** Browser WebSocket: live kline + 1s mark/ticker price (Binance → Bybit, auto-reconnect). */
 
 const TF_BINANCE = { '15m': '15m', '1h': '1h' }
 const TF_BYBIT = { '15m': '15', '1h': '60' }
 
-function parseBinanceKline(msg) {
-  const k = msg?.k
-  if (!k) return null
-  return {
-    time: Math.floor(Number(k.t) / 1000),
-    open: Number(k.o),
-    high: Number(k.h),
-    low: Number(k.l),
-    close: Number(k.c),
-    volume: Number(k.v),
-    closed: Boolean(k.x),
-    source: 'binance',
-  }
-}
+/**
+ * Normalized events:
+ * - { type:'kline', time, open, high, low, close, volume, closed, source }
+ * - { type:'tick', price, source }
+ */
 
-function parseBybitKline(msg) {
-  const row = msg?.data?.[0]
-  if (!row || msg.topic?.indexOf('kline.') !== 0) return null
-  return {
-    time: Math.floor(Number(row.start) / 1000),
-    open: Number(row.open),
-    high: Number(row.high),
-    low: Number(row.low),
-    close: Number(row.close),
-    volume: Number(row.volume),
-    closed: row.confirm === true,
-    source: 'bybit',
-  }
-}
-
-function connectBinance(symbol, timeframe, onCandle, onStatus) {
+function connectBinance(symbol, timeframe, onEvent, onStatus) {
   const tf = TF_BINANCE[timeframe]
   if (!tf) throw new Error(`Unsupported TF ${timeframe}`)
-  const stream = `${symbol.toLowerCase()}@kline_${tf}`
-  const url = `wss://fstream.binance.com/ws/${stream}`
+  const sym = symbol.toLowerCase()
+  // Combined: forming candle + mark price every 1s (TradingView-like motion)
+  const url =
+    `wss://fstream.binance.com/stream?streams=${sym}@kline_${tf}/${sym}@markPrice@1s`
   const ws = new WebSocket(url)
   let alive = true
 
   ws.onopen = () => onStatus?.({ connected: true, source: 'binance' })
   ws.onmessage = (ev) => {
     try {
-      const candle = parseBinanceKline(JSON.parse(ev.data))
-      if (candle) onCandle(candle)
+      const msg = JSON.parse(ev.data)
+      const data = msg.data || msg
+      if (data.e === 'kline' && data.k) {
+        const k = data.k
+        onEvent({
+          type: 'kline',
+          time: Math.floor(Number(k.t) / 1000),
+          open: Number(k.o),
+          high: Number(k.h),
+          low: Number(k.l),
+          close: Number(k.c),
+          volume: Number(k.v),
+          closed: Boolean(k.x),
+          source: 'binance',
+        })
+        return
+      }
+      if (data.e === 'markPriceUpdate' && data.p != null) {
+        onEvent({ type: 'tick', price: Number(data.p), source: 'binance' })
+      }
     } catch {
-      /* ignore bad frames */
+      /* ignore */
     }
   }
   ws.onerror = () => onStatus?.({ connected: false, source: 'binance', error: true })
@@ -61,22 +57,43 @@ function connectBinance(symbol, timeframe, onCandle, onStatus) {
   }
 }
 
-function connectBybit(symbol, timeframe, onCandle, onStatus) {
+function connectBybit(symbol, timeframe, onEvent, onStatus) {
   const tf = TF_BYBIT[timeframe]
   if (!tf) throw new Error(`Unsupported TF ${timeframe}`)
+  const sym = symbol.toUpperCase()
   const url = 'wss://stream.bybit.com/v5/public/linear'
   const ws = new WebSocket(url)
   let alive = true
-  const topic = `kline.${tf}.${symbol.toUpperCase()}`
+  const klineTopic = `kline.${tf}.${sym}`
+  const tickTopic = `tickers.${sym}`
 
   ws.onopen = () => {
-    ws.send(JSON.stringify({ op: 'subscribe', args: [topic] }))
+    ws.send(JSON.stringify({ op: 'subscribe', args: [klineTopic, tickTopic] }))
     onStatus?.({ connected: true, source: 'bybit' })
   }
   ws.onmessage = (ev) => {
     try {
-      const candle = parseBybitKline(JSON.parse(ev.data))
-      if (candle) onCandle(candle)
+      const msg = JSON.parse(ev.data)
+      if (msg.topic === klineTopic && msg.data?.[0]) {
+        const row = msg.data[0]
+        onEvent({
+          type: 'kline',
+          time: Math.floor(Number(row.start) / 1000),
+          open: Number(row.open),
+          high: Number(row.high),
+          low: Number(row.low),
+          close: Number(row.close),
+          volume: Number(row.volume),
+          closed: row.confirm === true,
+          source: 'bybit',
+        })
+        return
+      }
+      if (msg.topic === tickTopic) {
+        const row = Array.isArray(msg.data) ? msg.data[0] : msg.data
+        const price = Number(row?.lastPrice ?? row?.markPrice)
+        if (Number.isFinite(price)) onEvent({ type: 'tick', price, source: 'bybit' })
+      }
     } catch {
       /* ignore */
     }
@@ -93,39 +110,70 @@ function connectBybit(symbol, timeframe, onCandle, onStatus) {
 }
 
 /**
- * Prefer Binance; if it errors/closes quickly, fall back to Bybit.
+ * Binance first, Bybit fallback, then reconnect loop.
  * Returns disconnect().
  */
-export function subscribeLiveKlines(symbol, timeframe, onCandle, onStatus) {
+export function subscribeLiveStream(symbol, timeframe, onEvent, onStatus) {
+  let stopped = false
   let disconnect = () => {}
-  let switched = false
+  let attempt = 0
+  let timer = null
   let opened = false
+  let usingBybit = false
 
-  const failTimer = setTimeout(() => {
-    if (!opened && !switched) {
-      switched = true
-      disconnect()
-      disconnect = connectBybit(symbol, timeframe, onCandle, onStatus)
-    }
-  }, 4000)
+  function start(provider) {
+    if (stopped) return
+    opened = false
+    const connect = provider === 'bybit' ? connectBybit : connectBinance
+    disconnect = connect(symbol, timeframe, onEvent, (st) => {
+      if (st.connected) {
+        opened = true
+        attempt = 0
+        onStatus?.(st)
+        return
+      }
+      onStatus?.(st)
+      if (stopped) return
+      // Fail over Binance → Bybit once, then reconnect with backoff
+      if (!usingBybit && provider === 'binance') {
+        usingBybit = true
+        disconnect()
+        start('bybit')
+        return
+      }
+      const delay = Math.min(15_000, 1000 * 2 ** Math.min(attempt, 4))
+      attempt += 1
+      timer = setTimeout(() => start(usingBybit ? 'bybit' : 'binance'), delay)
+    })
 
-  disconnect = connectBinance(symbol, timeframe, onCandle, (st) => {
-    if (st.connected) {
-      opened = true
-      clearTimeout(failTimer)
+    // If Binance never opens, switch to Bybit
+    if (provider === 'binance') {
+      timer = setTimeout(() => {
+        if (stopped || opened || usingBybit) return
+        usingBybit = true
+        disconnect()
+        start('bybit')
+      }, 3500)
     }
-    if (!st.connected && opened && !switched) {
-      switched = true
-      clearTimeout(failTimer)
-      disconnect()
-      disconnect = connectBybit(symbol, timeframe, onCandle, onStatus)
-      return
-    }
-    onStatus?.(st)
-  })
+  }
+
+  start('binance')
 
   return () => {
-    clearTimeout(failTimer)
+    stopped = true
+    if (timer) clearTimeout(timer)
     disconnect()
   }
+}
+
+/** @deprecated use subscribeLiveStream */
+export function subscribeLiveKlines(symbol, timeframe, onCandle, onStatus) {
+  return subscribeLiveStream(
+    symbol,
+    timeframe,
+    (ev) => {
+      if (ev.type === 'kline') onCandle(ev)
+    },
+    onStatus,
+  )
 }

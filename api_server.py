@@ -16,8 +16,16 @@ PORT = 8765
 ROOT = Path(__file__).resolve().parent
 SUMMARY = ROOT / 'ui' / 'public' / 'strategy_summary.json'
 TRADES_DIR = ROOT / 'ui' / 'public' / 'trades'
-STRATEGIES = ('EMA Trend Following', 'Donchian Breakout', 'Hammer SMA VWAP')
-SYMBOLS = ('BTCUSDT', 'ETHUSDT', 'SOLUSDT')
+STRATEGIES = (
+    'EMA Trend Following',
+    'Donchian Breakout',
+    'Hammer SMA VWAP',
+    'VWAP Rejection V1',
+)
+SYMBOLS = (
+    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
+    'DOGEUSDT', 'LINKUSDT', 'AVAXUSDT', 'ADAUSDT',
+)
 
 _state_lock = threading.Lock()
 _state: dict = {'last_scan': None}
@@ -83,6 +91,17 @@ def _run_node_ohlcv(symbol: str, timeframe: str, from_ms: int, to_ms: int) -> di
     )
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or 'ohlcv failed')
+    return json.loads(proc.stdout)
+
+
+def _run_node_ticker(symbol: str) -> dict:
+    args = ['node', str(ROOT / 'scripts' / 'run_ticker.mjs'), f'symbol={symbol}']
+    env = os.environ.copy()
+    proc = subprocess.run(
+        args, cwd=str(ROOT), capture_output=True, text=True, env=env, check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or 'ticker failed')
     return json.loads(proc.stdout)
 
 
@@ -160,6 +179,14 @@ class Handler(BaseHTTPRequestHandler):
                 with _state_lock:
                     _state['last_scan'] = result
                 self._json(200, result)
+            except Exception as e:
+                self._json(500, {'error': str(e)})
+            return
+
+        if path == '/api/ticker':
+            symbol = (qs.get('symbol') or ['SOLUSDT'])[0].upper()
+            try:
+                self._json(200, _run_node_ticker(symbol))
             except Exception as e:
                 self._json(500, {'error': str(e)})
             return

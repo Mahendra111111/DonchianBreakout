@@ -11,16 +11,30 @@ import { subscribeLiveStream } from './liveSocket'
 import { strategyOverlays } from './strategyIndicators'
 
 const PAPER_POLL_MS = 60_000
+const TICK_POLL_MS = 1_000
+
+function barMsFor(timeframe) {
+  return timeframe === '15m' ? 15 * 60_000 : 60 * 60_000
+}
 
 function barTimeSec(isoOrMs, timeframe) {
   const ms = typeof isoOrMs === 'number' ? isoOrMs : Date.parse(isoOrMs)
-  const barMs = timeframe === '15m' ? 15 * 60_000 : 60 * 60_000
+  const barMs = barMsFor(timeframe)
   return Math.floor(ms / barMs) * (barMs / 1000)
 }
 
 function barOpenSec(timeframe, nowMs = Date.now()) {
-  const barMs = timeframe === '15m' ? 15 * 60_000 : 60 * 60_000
+  const barMs = barMsFor(timeframe)
   return Math.floor(nowMs / barMs) * (barMs / 1000)
+}
+
+function candleCountdown(timeframe, nowMs = Date.now()) {
+  const barMs = barMsFor(timeframe)
+  const left = barMs - (nowMs % barMs)
+  const totalSec = Math.floor(left / 1000)
+  const m = Math.floor(totalSec / 60)
+  const s = totalSec % 60
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
 export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade }) {
@@ -30,15 +44,19 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
   const overlaySeriesRef = useRef([])
   const markersApiRef = useRef(null)
   const priceLinesRef = useRef([])
+  const lastPriceLineRef = useRef(null)
   const candlesRef = useRef([])
   const readyRef = useRef(false)
+  const pendingTickRef = useRef(null)
 
   const [paper, setPaper] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [stream, setStream] = useState({ connected: false, source: null })
+  const [tickSource, setTickSource] = useState(null)
   const [lastPrice, setLastPrice] = useState(null)
   const [tickAt, setTickAt] = useState(null)
+  const [countdown, setCountdown] = useState(() => candleCountdown(timeframe))
   const knownClosed = useRef(new Set())
   const [freshNote, setFreshNote] = useState('')
 
@@ -49,6 +67,26 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
       try { series.removePriceLine(line) } catch { /* */ }
     }
     priceLinesRef.current = []
+    if (lastPriceLineRef.current) {
+      try { series.removePriceLine(lastPriceLineRef.current) } catch { /* */ }
+      lastPriceLineRef.current = null
+    }
+  }
+
+  function setLivePriceLine(price) {
+    const series = candleSeriesRef.current
+    if (!series || !Number.isFinite(price)) return
+    if (lastPriceLineRef.current) {
+      try { series.removePriceLine(lastPriceLineRef.current) } catch { /* */ }
+    }
+    lastPriceLineRef.current = series.createPriceLine({
+      price,
+      color: '#e35d5d',
+      lineWidth: 1,
+      lineStyle: 0,
+      axisLabelVisible: true,
+      title: countdown,
+    })
   }
 
   function applyOverlays(candles) {
@@ -76,6 +114,7 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
   function applyPaperMarkers(body) {
     const series = candleSeriesRef.current
     if (!series) return
+    const savedLast = lastPrice
     clearPriceLines()
     if (markersApiRef.current) {
       try { markersApiRef.current.setMarkers([]) } catch { /* */ }
@@ -126,14 +165,20 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
         }),
       ]
     }
+    if (savedLast != null) setLivePriceLine(Number(savedLast))
   }
 
   function pushCandleUpdate(bar, volume) {
     const series = candleSeriesRef.current
     if (!series || !readyRef.current) return
-    series.update(bar)
+    try {
+      series.update(bar)
+    } catch {
+      return
+    }
     setLastPrice(bar.close)
     setTickAt(Date.now())
+    setLivePriceLine(bar.close)
 
     const list = candlesRef.current
     const last = list[list.length - 1]
@@ -146,15 +191,20 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
     chartRef.current?.timeScale().scrollToRealTime()
   }
 
-  function applyTickPrice(price) {
-    if (!Number.isFinite(price) || !readyRef.current) return
+  function applyTickPrice(price, source) {
+    if (!Number.isFinite(price)) return
+    if (!readyRef.current) {
+      pendingTickRef.current = { price, source }
+      setLastPrice(price)
+      setTickAt(Date.now())
+      if (source) setTickSource(source)
+      return
+    }
     const list = candlesRef.current
     let last = list[list.length - 1]
-    const openT = barOpenSec(timeframe)
-
     if (!last) return
 
-    // New bar started
+    const openT = barOpenSec(timeframe)
     if (openT > last.time) {
       last = {
         time: openT,
@@ -176,6 +226,7 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
       list[list.length - 1] = last
     }
 
+    if (source) setTickSource(source)
     pushCandleUpdate(
       { time: last.time, open: last.open, high: last.high, low: last.low, close: last.close },
       last.volume,
@@ -223,6 +274,7 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
         if (last) {
           setLastPrice(last.close)
           setTickAt(Date.now())
+          setLivePriceLine(last.close)
         }
       } else if (series && readyRef.current) {
         applyPaperMarkers(body)
@@ -263,12 +315,15 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
       borderVisible: false,
       wickUpColor: '#3dba7a',
       wickDownColor: '#e35d5d',
+      lastValueVisible: true,
+      priceLineVisible: true,
     })
     chartRef.current = chart
     candleSeriesRef.current = series
     overlaySeriesRef.current = []
     markersApiRef.current = null
     priceLinesRef.current = []
+    lastPriceLineRef.current = null
     candlesRef.current = []
 
     const resizeObs = new ResizeObserver(() => {
@@ -290,7 +345,7 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
     }
   }, [symbol, timeframe])
 
-  // History seed once + paper sync every 60s (not for price)
+  // Seed history + paper sync (not used for live price)
   useEffect(() => {
     knownClosed.current = new Set()
     setFreshNote('')
@@ -300,14 +355,37 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
     return () => clearInterval(t)
   }, [symbol, timeframe, strategy])
 
-  // Real-time stream — price moves without Refresh
+  // Reliable live price: server ticker every 1s (works even when browser WS is blocked)
+  useEffect(() => {
+    let cancelled = false
+    async function tick() {
+      try {
+        const res = await fetch(`/api/ticker?symbol=${encodeURIComponent(symbol)}`)
+        const body = await res.json()
+        if (cancelled || !res.ok) return
+        applyTickPrice(Number(body.price), body.source || 'ticker')
+      } catch {
+        /* keep last price */
+      }
+    }
+    tick()
+    const id = setInterval(tick, TICK_POLL_MS)
+    const cd = setInterval(() => setCountdown(candleCountdown(timeframe)), 1000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+      clearInterval(cd)
+    }
+  }, [symbol, timeframe])
+
+  // Optional WS acceleration when browser can reach the exchange
   useEffect(() => {
     const disconnect = subscribeLiveStream(
       symbol,
       timeframe,
       (ev) => {
         if (ev.type === 'tick') {
-          applyTickPrice(ev.price)
+          applyTickPrice(ev.price, ev.source)
           return
         }
         if (ev.type === 'kline') {
@@ -321,6 +399,7 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
             },
             ev.volume,
           )
+          setTickSource(ev.source)
         }
       },
       (st) => setStream(st),
@@ -328,12 +407,19 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
     return disconnect
   }, [symbol, timeframe])
 
+  // Refresh countdown label on live price line
+  useEffect(() => {
+    if (lastPrice != null) setLivePriceLine(lastPrice)
+  }, [countdown, lastPrice])
+
   const trades = paper?.trade_list || []
   const open = paper?.open
   const summary = paper?.summary
-  const streamLabel = stream.connected
-    ? `LIVE · ${stream.source}`
-    : 'connecting live stream…'
+  const liveLabel = tickSource
+    ? `LIVE · ${tickSource}`
+    : stream.connected
+      ? `LIVE · ${stream.source}`
+      : 'starting live ticks…'
 
   return (
     <section className="live-desk table-wrap">
@@ -341,9 +427,9 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
         <h2>
           Live paper desk
           <span>
-            {streamLabel}
+            {liveLabel}
             {lastPrice != null ? ` · ${Number(lastPrice).toFixed(4)}` : ''}
-            {tickAt ? ` · ${fmtTime(tickAt)}` : ''}
+            {` · ${countdown} left`}
             {busy ? ' · paper sync…' : ''}
           </span>
         </h2>
@@ -355,14 +441,14 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
       {error && <div className="banner error">{error}</div>}
       {freshNote && <div className="banner">{freshNote}</div>}
       <div className="banner">
-        Price streams live every ~1s (WebSocket) — no refresh needed. Paper trades sync every 60s.
+        Live price updates every 1s automatically (no refresh). Candle countdown on the price tag. Paper trades sync every 60s.
       </div>
 
       {summary && (
         <div className="stats live-stats">
           <article>
-            <span>Last price</span>
-            <strong className={`live-price ${stream.connected ? 'live-on' : ''}`}>
+            <span>Last price · {countdown}</span>
+            <strong className="live-price live-on">
               {lastPrice != null ? Number(lastPrice).toFixed(4) : '—'}
             </strong>
           </article>

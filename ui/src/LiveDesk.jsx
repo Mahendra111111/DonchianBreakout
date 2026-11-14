@@ -34,7 +34,7 @@ function candleCountdown(timeframe, nowMs = Date.now()) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade }) {
+export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade, onPaperUpdate }) {
   const hostRef = useRef(null)
   const chartRef = useRef(null)
   const candleSeriesRef = useRef(null)
@@ -45,6 +45,8 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
   const candlesRef = useRef([])
   const readyRef = useRef(false)
   const pendingTickRef = useRef(null)
+  const timeframeRef = useRef(timeframe)
+  timeframeRef.current = timeframe
 
   const [paper, setPaper] = useState(null)
   const [error, setError] = useState('')
@@ -56,7 +58,14 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
   const [countdown, setCountdown] = useState(() => candleCountdown(timeframe))
   const knownClosed = useRef(new Set())
   const loadGenRef = useRef(0)
+  const stickToRealtimeRef = useRef(true)
+  const suppressRangeRef = useRef(false)
+  const [pinned, setPinned] = useState(true)
   const [freshNote, setFreshNote] = useState('')
+
+  useEffect(() => {
+    setCountdown(candleCountdown(timeframe))
+  }, [timeframe])
 
   function clearPriceLines() {
     const series = candleSeriesRef.current
@@ -83,7 +92,8 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
       lineWidth: 1,
       lineStyle: 0,
       axisLabelVisible: true,
-      title: countdown,
+      // Always compute from current TF — avoids stale 1h label flash on 5m
+      title: candleCountdown(timeframeRef.current),
     })
   }
 
@@ -180,13 +190,18 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
 
     const list = candlesRef.current
     const last = list[list.length - 1]
+    let isNewBar = false
     if (last && last.time === bar.time) {
       list[list.length - 1] = { ...bar, volume: volume ?? last.volume ?? 0 }
     } else if (!last || bar.time > last.time) {
       list.push({ ...bar, volume: volume ?? 0 })
       if (list.length > 600) list.shift()
+      isNewBar = true
     }
-    chartRef.current?.timeScale().scrollToRealTime()
+    // Only re-pin on a NEW bar while user is at the right edge — never fight a left pan
+    if (stickToRealtimeRef.current && isNewBar) {
+      chartRef.current?.timeScale().scrollToRealTime()
+    }
   }
 
   function applyTickPrice(price, source) {
@@ -202,7 +217,7 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
     let last = list[list.length - 1]
     if (!last) return
 
-    const openT = barOpenSec(timeframe)
+    const openT = barOpenSec(timeframeRef.current)
     if (openT > last.time) {
       last = {
         time: openT,
@@ -256,6 +271,7 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
       }
 
       setPaper(body)
+      onPaperUpdate?.(body)
       setError('')
 
       const series = candleSeriesRef.current
@@ -270,7 +286,11 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
         })))
         applyOverlays(candles)
         applyPaperMarkers(body)
+        suppressRangeRef.current = true
+        stickToRealtimeRef.current = true
+        setPinned(true)
         chartRef.current?.timeScale().scrollToRealTime()
+        requestAnimationFrame(() => { suppressRangeRef.current = false })
         readyRef.current = true
         const last = candles.at(-1)
         if (last) {
@@ -311,10 +331,11 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
         borderColor: '#2a3830',
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 8,
+        rightOffset: 18,
+        shiftVisibleRangeOnNewBar: false,
       },
       width: hostRef.current.clientWidth,
-      height: hostRef.current.clientHeight || 420,
+      height: hostRef.current.clientHeight || 520,
     })
     const series = chart.addSeries(CandlestickSeries, {
       upColor: '#3dba7a',
@@ -332,18 +353,36 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
     priceLinesRef.current = []
     lastPriceLineRef.current = null
     candlesRef.current = []
+    stickToRealtimeRef.current = true
+    suppressRangeRef.current = false
+
+    const onRange = (range) => {
+      if (suppressRangeRef.current || !range) return
+      const n = candlesRef.current.length
+      if (n < 2) return
+      // Unpin as soon as the right edge leaves the last candle (TV blank-space pan)
+      const atEnd = range.to >= n - 1
+      if (stickToRealtimeRef.current !== atEnd) {
+        stickToRealtimeRef.current = atEnd
+        setPinned(atEnd)
+      }
+    }
+    chart.timeScale().subscribeVisibleLogicalRangeChange(onRange)
 
     const resizeObs = new ResizeObserver(() => {
       if (!hostRef.current || !chartRef.current) return
       chartRef.current.applyOptions({
         width: hostRef.current.clientWidth,
-        height: hostRef.current.clientHeight || 420,
+        height: hostRef.current.clientHeight || 520,
       })
     })
     resizeObs.observe(hostRef.current)
 
     return () => {
       readyRef.current = false
+      try {
+        chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
+      } catch { /* */ }
       resizeObs.disconnect()
       clearPriceLines()
       chart.remove()
@@ -425,7 +464,6 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
     if (lastPrice != null) setLivePriceLine(lastPrice)
   }, [countdown, lastPrice])
 
-  const trades = paper?.trade_list || []
   const open = paper?.open
   const summary = paper?.summary
   const liveLabel = tickSource
@@ -435,125 +473,48 @@ export default function LiveDesk({ symbol, timeframe, strategy, onSelectTrade })
       : 'starting live ticks…'
 
   return (
-    <section className="live-desk table-wrap">
-      <div className="table-head">
-        <h2>
-          Live paper desk
-          <span>
-            {liveLabel}
-            {lastPrice != null ? ` · ${Number(lastPrice).toFixed(4)}` : ''}
-            {` · ${countdown} left`}
-            {busy ? ' · paper sync…' : ''}
-          </span>
-        </h2>
-        <button type="button" className="scan-btn" disabled={busy} onClick={() => loadPaper({ seedChart: true })}>
-          Sync paper
-        </button>
+    <section className="live-desk">
+      <div className="live-toolbar">
+        <div className="live-toolbar-meta">
+          <strong className="live-price live-on">
+            {lastPrice != null ? Number(lastPrice).toFixed(4) : '—'}
+          </strong>
+          <span>{liveLabel}</span>
+          <span>{countdown} left · {timeframe}</span>
+          {open && (
+            <span className={open.unrealized >= 0 ? 'up' : 'down'}>
+              {open.side} · {Number(open.unrealized).toFixed(2)}
+            </span>
+          )}
+          {!open && summary && <span>Flat · {summary.trades} paper trades</span>}
+          {busy && <span>sync…</span>}
+        </div>
+        <div className="live-toolbar-actions">
+          {!pinned && (
+            <button
+              type="button"
+              className="tv-scan ghost"
+              onClick={() => {
+                suppressRangeRef.current = true
+                stickToRealtimeRef.current = true
+                setPinned(true)
+                chartRef.current?.timeScale().scrollToRealTime()
+                requestAnimationFrame(() => { suppressRangeRef.current = false })
+              }}
+            >
+              Jump to realtime
+            </button>
+          )}
+          <button type="button" className="tv-scan" disabled={busy} onClick={() => loadPaper({ seedChart: true })}>
+            Sync
+          </button>
+        </div>
       </div>
 
       {error && <div className="banner error">{error}</div>}
-      {freshNote && <div className="banner">{freshNote}</div>}
-      <div className="banner">
-        Live price updates every 1s automatically (no refresh). Candle countdown on the price tag. Paper trades sync every 60s.
-      </div>
-
-      {summary && (
-        <div className="stats live-stats">
-          <article>
-            <span>Last price · {countdown}</span>
-            <strong className="live-price live-on">
-              {lastPrice != null ? Number(lastPrice).toFixed(4) : '—'}
-            </strong>
-          </article>
-          <article>
-            <span>Live window trades</span>
-            <strong>{summary.trades}</strong>
-          </article>
-          <article>
-            <span>Successful</span>
-            <strong className="up">{summary.successful}</strong>
-          </article>
-          <article>
-            <span>Failed</span>
-            <strong className="down">{summary.failed}</strong>
-          </article>
-          <article>
-            <span>Open position</span>
-            <strong className={open ? 'up' : ''}>{open ? `${open.side} @ ${Number(open.entry).toFixed(4)}` : 'Flat'}</strong>
-          </article>
-          {open && (
-            <article>
-              <span>Unrealized</span>
-              <strong className={open.unrealized >= 0 ? 'up' : 'down'}>{Number(open.unrealized).toFixed(2)}</strong>
-            </article>
-          )}
-        </div>
-      )}
+      {freshNote && <div className="banner quiet">{freshNote}</div>}
 
       <div className="chart-host live-chart-host" ref={hostRef} />
-
-      <div className="table-head">
-        <h2>
-          Live paper records
-          <span>{trades.length} closed in feed window · click row for detail chart</span>
-        </h2>
-      </div>
-      <div className="scroll live-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Side</th>
-              <th>Entry</th>
-              <th>Exit</th>
-              <th>Net $</th>
-              <th>Reason</th>
-              <th>Outcome</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[...trades].reverse().map((t, i) => {
-              const ok = t.outcome === 'successful'
-              return (
-                <tr
-                  key={`${t.entry_time}-${t.exit_time}-${i}`}
-                  className={`${ok ? 'row-win' : 'row-loss'} trade-row`}
-                  onClick={() => onSelectTrade?.(t)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      onSelectTrade?.(t)
-                    }
-                  }}
-                  tabIndex={0}
-                  role="button"
-                >
-                  <td>{trades.length - i}</td>
-                  <td><span className={`side ${t.side === 'LONG' ? 'long' : 'short'}`}>{t.side}</span></td>
-                  <td>
-                    <div className="stack">
-                      <span>{Number(t.entry).toFixed(4)}</span>
-                      <small>{fmtTime(t.entry_time)}</small>
-                    </div>
-                  </td>
-                  <td>
-                    <div className="stack">
-                      <span>{Number(t.exit).toFixed(4)}</span>
-                      <small>{fmtTime(t.exit_time)}</small>
-                    </div>
-                  </td>
-                  <td className={t.net >= 0 ? 'up' : 'down'}>{Number(t.net).toFixed(2)}</td>
-                  <td>{t.reason}</td>
-                  <td><span className={`badge ${ok ? 'win' : 'loss'}`}>{ok ? 'Successful' : 'Failed'}</span></td>
-                </tr>
-              )
-            })}
-            {trades.length === 0 && (
-              <tr><td colSpan={7} className="empty">No closed paper trades in the live window yet.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
     </section>
   )
 }

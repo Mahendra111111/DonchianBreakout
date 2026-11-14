@@ -22,6 +22,8 @@ exports/parquet_cache/
 exports/strategy_research_report.json
 exports/_summarize_report.py
 *.pkl
+# large local-only research dump (use api/trades + strategy_summary instead)
+exports/*.json
 
 # Old / regenerable backtest outputs
 results/

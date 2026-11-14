@@ -14,6 +14,7 @@ HOST = '127.0.0.1'
 PORT = 8765
 ROOT = Path(__file__).resolve().parent
 SUMMARY = ROOT / 'ui' / 'public' / 'strategy_summary.json'
+TRADES_DIR = ROOT / 'ui' / 'public' / 'trades'
 STRATEGIES = ('EMA Trend Following', 'Donchian Breakout', 'Hammer SMA VWAP')
 SYMBOLS = ('BTCUSDT', 'ETHUSDT', 'SOLUSDT')
 
@@ -27,6 +28,18 @@ def _load_summary() -> dict:
             f'Missing {SUMMARY}. Run: python strategy_research_report.py'
         )
     return json.loads(SUMMARY.read_text(encoding='utf-8'))
+
+
+def _load_trades(file_name: str | None) -> list:
+    if not file_name:
+        return []
+    path = TRADES_DIR / Path(file_name).name
+    if not path.exists():
+        alt = ROOT / 'api' / 'trades' / Path(file_name).name
+        path = alt if alt.exists() else path
+    if not path.exists():
+        return []
+    return json.loads(path.read_text(encoding='utf-8'))
 
 
 def _run_node_scan(notify: bool) -> dict:
@@ -108,6 +121,7 @@ class Handler(BaseHTTPRequestHandler):
             symbol = (qs.get('symbol') or ['SOLUSDT'])[0].upper()
             strategy = (qs.get('strategy') or ['Donchian Breakout'])[0]
             timeframe = (qs.get('timeframe') or ['1h'])[0]
+            period = (qs.get('period') or ['5y'])[0]
             try:
                 data = _load_summary()
             except Exception as e:
@@ -124,27 +138,48 @@ class Handler(BaseHTTPRequestHandler):
                 })
                 return
             row = rows[0]
-            wr = row.get('win_rate_pct')
-            trades = int(row.get('trades') or 0)
-            successful = int(round((wr / 100) * trades)) if wr is not None else None
+            periods = row.get('periods') or {}
+            period_row = periods.get(period) or periods.get('5y') or {}
+            trade_list = period_row.get('trade_list') or _load_trades(period_row.get('trades_file'))
+            successful = sum(1 for t in trade_list if t.get('outcome') == 'successful')
+            trades = int(period_row.get('trades') or len(trade_list) or 0)
+            wr = period_row.get('win_rate_pct')
+            period_cards = {}
+            for key, p in periods.items():
+                period_cards[key] = {
+                    'period': key,
+                    'trades': p.get('trades'),
+                    'net_return_pct': p.get('net_return_pct'),
+                    'win_rate_pct': p.get('win_rate_pct'),
+                    'profit_factor': p.get('profit_factor'),
+                    'max_dd_pct': p.get('max_dd_pct'),
+                    'trades_file': p.get('trades_file'),
+                }
             self._json(200, {
                 'ready': True,
                 'summary': {
                     'symbol': symbol,
                     'strategy': strategy,
                     'timeframe': timeframe,
+                    'period': period,
+                    'from': period_row.get('from'),
+                    'to': period_row.get('to'),
                     'trades': trades,
                     'successful': successful,
-                    'failed': (trades - successful) if successful is not None else None,
+                    'failed': max(0, trades - successful),
                     'success_rate_pct': round(wr, 2) if wr is not None else None,
-                    'net_return_pct': row.get('net_return_pct'),
-                    'profit_factor': row.get('profit_factor'),
-                    'max_dd_pct': row.get('max_dd_pct'),
-                    'expectancy': row.get('expectancy'),
-                    'final_equity': row.get('final_equity'),
-                    'stop_exit_pct': row.get('stop_exit_pct'),
+                    'net_return_pct': period_row.get('net_return_pct'),
+                    'profit_factor': period_row.get('profit_factor'),
+                    'max_dd_pct': period_row.get('max_dd_pct'),
+                    'expectancy': period_row.get('expectancy'),
+                    'final_equity': period_row.get('final_equity'),
+                    'stop_exit_pct': period_row.get('stop_exit_pct'),
+                    'trades_file': period_row.get('trades_file'),
                     'data_source': 'research:strategy_summary.json',
                 },
+                'trade_list': trade_list,
+                'period_cards': period_cards,
+                'periods': data.get('periods') or list(periods.keys()),
                 'ranking': data.get('ranking'),
                 'updated': data.get('updated'),
             })

@@ -13,6 +13,7 @@ CACHE = EXPORTS / 'parquet_cache'
 REPORT = EXPORTS / 'strategy_research_report.json'
 SUMMARY = Path('ui/public/strategy_summary.json')
 SUMMARY_API = Path('api/strategy_summary.json')
+TRADES_UI = Path('ui/public/trades')
 SYMBOLS = ('BTCUSDT', 'ETHUSDT', 'SOLUSDT')
 TFS = ('15m', '1h')
 FEE = 0.0005
@@ -50,10 +51,27 @@ def atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
     return tr.ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
 
 
+PERIODS = (
+    ('7d', 7),
+    ('15d', 15),
+    ('1m', 30),
+    ('3m', 90),
+    ('6m', 180),
+    ('1y', 365),
+    ('3y', 365 * 3),
+    ('5y', 365 * 5),
+)
+WARMUP_BARS = 250
+
+
 def run_signal_backtest(df: pd.DataFrame, long_entry: pd.Series, short_entry: pd.Series,
                         long_exit: pd.Series | None = None, short_exit: pd.Series | None = None,
-                        stop_atr: float = 1.5, rr: float = 1.5) -> dict:
-    """One-position market sim: enter next open, ATR stop + RR target, optional signal exit."""
+                        stop_atr: float = 1.5, rr: float = 1.5,
+                        entry_from: pd.Timestamp | None = None) -> dict:
+    """One-position market sim: enter next open, ATR stop + RR target, optional signal exit.
+
+    If entry_from is set, only trades entered on/after that timestamp are kept in metrics.
+    """
     a = atr(df)
     equity = INITIAL
     trades = []
@@ -66,6 +84,7 @@ def run_signal_backtest(df: pd.DataFrame, long_entry: pd.Series, short_entry: pd
     highs = df.high.values
     lows = df.low.values
     atr_v = a.values
+    times = df.index.to_numpy()
     for i in range(1, len(df)):
         atr_i = float(atr_v[i - 1]) if np.isfinite(atr_v[i - 1]) else np.nan
         if pos is not None:
@@ -90,11 +109,23 @@ def run_signal_backtest(df: pd.DataFrame, long_entry: pd.Series, short_entry: pd
                 fees = FEE * (pos['entry'] * pos['qty'] + exit_price * pos['qty'])
                 net = gross - fees
                 equity += gross - FEE * exit_price * pos['qty']
-                trades.append({'net': net, 'reason': reason, 'side': pos['side']})
+                trades.append({
+                    'entry_time': pd.Timestamp(times[pos['i']]).isoformat(),
+                    'exit_time': pd.Timestamp(times[i]).isoformat(),
+                    'side': 'LONG' if pos['side'] == 1 else 'SHORT',
+                    'entry': float(pos['entry']),
+                    'exit': float(exit_price),
+                    'net': float(net),
+                    'reason': reason,
+                    'outcome': 'successful' if net > 0 else 'failed',
+                })
                 pos = None
         if pos is None and np.isfinite(atr_i) and atr_i > 0:
             side = 1 if bool(le[i - 1]) else (-1 if bool(se[i - 1]) else 0)
             if side:
+                ts = pd.Timestamp(times[i])
+                if entry_from is not None and ts < entry_from:
+                    continue
                 entry = float(opens[i]) * (1 + SLIP if side == 1 else 1 - SLIP)
                 stop = entry - side * stop_atr * atr_i
                 dist = abs(entry - stop)
@@ -105,10 +136,13 @@ def run_signal_backtest(df: pd.DataFrame, long_entry: pd.Series, short_entry: pd
                     continue
                 target = entry + side * rr * dist
                 equity -= FEE * entry * qty
-                pos = {'side': side, 'entry': entry, 'stop': stop, 'target': target, 'qty': qty}
+                pos = {'side': side, 'entry': entry, 'stop': stop, 'target': target, 'qty': qty, 'i': i}
     if not trades:
-        return {'trades': 0, 'win_rate_pct': None, 'net_return_pct': 0.0, 'profit_factor': None,
-                'max_dd_pct': 0.0, 'expectancy': None, 'final_equity': equity, 'stop_exit_pct': None}
+        return {
+            'trades': 0, 'win_rate_pct': None, 'net_return_pct': 0.0, 'profit_factor': None,
+            'max_dd_pct': 0.0, 'expectancy': None, 'final_equity': equity, 'stop_exit_pct': None,
+            'trade_list': [],
+        }
     t = pd.DataFrame(trades)
     wins = t[t.net > 0]
     losses = t[t.net <= 0]
@@ -130,7 +164,53 @@ def run_signal_backtest(df: pd.DataFrame, long_entry: pd.Series, short_entry: pd
         'expectancy': float(t.net.mean()),
         'final_equity': float(equity),
         'stop_exit_pct': float((t.reason == 'stop').mean() * 100),
+        'trade_list': trades,
     }
+
+
+def period_backtests(df: pd.DataFrame, name: str, fn, rr: float) -> dict:
+    """Run each lookback window with indicator warmup; return metrics + trade records."""
+    end = df.index.max()
+    out = {}
+    for label, days in PERIODS:
+        start = end - pd.Timedelta(days=days)
+        # warmup bars before window for SMA/EMA/Donchian
+        if len(df) <= WARMUP_BARS + 5:
+            sub = df
+            entry_from = start
+        else:
+            # find index for start, then take WARMUP_BARS before it
+            pos = df.index.searchsorted(start)
+            warm_pos = max(0, pos - WARMUP_BARS)
+            sub = df.iloc[warm_pos:]
+            entry_from = start
+        le, se, lx, sx = fn(sub)
+        metrics = run_signal_backtest(
+            sub,
+            le.reindex(sub.index).fillna(False),
+            se.reindex(sub.index).fillna(False),
+            lx.reindex(sub.index).fillna(False),
+            sx.reindex(sub.index).fillna(False),
+            stop_atr=1.5,
+            rr=rr,
+            entry_from=entry_from,
+        )
+        out[label] = {
+            'period': label,
+            'days': days,
+            'from': start.isoformat(),
+            'to': end.isoformat(),
+            'trades': metrics['trades'],
+            'win_rate_pct': metrics['win_rate_pct'],
+            'net_return_pct': metrics['net_return_pct'],
+            'profit_factor': metrics['profit_factor'],
+            'max_dd_pct': metrics['max_dd_pct'],
+            'expectancy': metrics['expectancy'],
+            'final_equity': metrics['final_equity'],
+            'stop_exit_pct': metrics['stop_exit_pct'],
+            'trade_list': metrics['trade_list'],
+        }
+    return out
 
 
 def signals_ema_trend(df: pd.DataFrame):
@@ -203,20 +283,25 @@ def main():
             df = load_tf(sym, tf)
             print(f'Backtesting {sym} {tf}…', flush=True)
             for name, fn in STRATEGIES.items():
-                le, se, lx, sx = fn(df)
                 rr = STRATEGY_RR.get(name, 1.5)
-                metrics = run_signal_backtest(
-                    df,
-                    le.reindex(df.index).fillna(False),
-                    se.reindex(df.index).fillna(False),
-                    lx.reindex(df.index).fillna(False),
-                    sx.reindex(df.index).fillna(False),
-                    stop_atr=1.5,
-                    rr=rr,
-                )
-                strategy_rows.append({'strategy': name, 'symbol': sym, 'timeframe': tf, **metrics})
+                periods = period_backtests(df, name, fn, rr)
+                full = periods['5y']
+                strategy_rows.append({
+                    'strategy': name,
+                    'symbol': sym,
+                    'timeframe': tf,
+                    'trades': full['trades'],
+                    'win_rate_pct': full['win_rate_pct'],
+                    'net_return_pct': full['net_return_pct'],
+                    'profit_factor': full['profit_factor'],
+                    'max_dd_pct': full['max_dd_pct'],
+                    'expectancy': full['expectancy'],
+                    'final_equity': full['final_equity'],
+                    'stop_exit_pct': full['stop_exit_pct'],
+                    'periods': periods,
+                })
 
-    res = pd.DataFrame(strategy_rows)
+    res = pd.DataFrame([{k: v for k, v in r.items() if k != 'periods'} for r in strategy_rows])
     summary = []
     for strat in STRATEGIES:
         sub = res[res.strategy == strat]
@@ -248,6 +333,7 @@ def main():
         'assumptions': {
             'market': 'Binance USD-M perpetual OHLCV from exports Excel',
             'strategies': list(STRATEGIES.keys()),
+            'periods': [p[0] for p in PERIODS],
             'fee_per_side': FEE,
             'slippage_per_side': SLIP,
             'risk_pct': RISK_PCT,
@@ -259,12 +345,31 @@ def main():
         'strategy_results': strategy_rows,
         'strategy_ranking': summary,
     }
+    # Full report kept locally (gitignored) — includes every trade
     REPORT.write_text(json.dumps(report, indent=2, default=str))
+
+    # Slim UI/API payload: period metrics only; trade lists in ui/public/trades
+    TRADES_UI.mkdir(parents=True, exist_ok=True)
+    slim_rows = []
+    for row in strategy_rows:
+        periods_slim = {}
+        for label, pdata in (row.get('periods') or {}).items():
+            trade_list = pdata.get('trade_list') or []
+            key = (
+                f"{row['strategy'].replace(' ', '_')}_{row['symbol']}_"
+                f"{row['timeframe']}_{label}.json"
+            )
+            (TRADES_UI / key).write_text(json.dumps(trade_list, default=str))
+            periods_slim[label] = {k: v for k, v in pdata.items() if k != 'trade_list'}
+            periods_slim[label]['trades_file'] = key
+        slim_rows.append({**{k: v for k, v in row.items() if k != 'periods'}, 'periods': periods_slim})
+
     payload = {
         'strategies': list(STRATEGIES.keys()),
+        'periods': [p[0] for p in PERIODS],
         'ranking': summary,
-        'results': strategy_rows,
-        'updated': pd.Timestamp.utcnow().isoformat(),
+        'results': slim_rows,
+        'updated': pd.Timestamp.now('UTC').isoformat(),
     }
     text = json.dumps(payload, indent=2, default=str)
     SUMMARY.parent.mkdir(parents=True, exist_ok=True)
@@ -275,6 +380,7 @@ def main():
     print(f'\nWrote {REPORT.resolve()}')
     print(f'Wrote {SUMMARY.resolve()}')
     print(f'Wrote {SUMMARY_API.resolve()}')
+    print(f'Wrote trade files under {TRADES_UI.resolve()}')
 
 
 if __name__ == '__main__':

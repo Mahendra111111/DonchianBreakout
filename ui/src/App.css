@@ -81,6 +81,22 @@ h1 {
   font: inherit;
 }
 
+.scan-btn {
+  align-self: end;
+  padding: 10px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.scan-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
 .banner {
   padding: 12px 14px;
   border-radius: 8px;

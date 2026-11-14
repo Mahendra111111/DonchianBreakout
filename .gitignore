@@ -1,8 +1,32 @@
+# Secrets & local tooling
 .env
 .venv/
 __pycache__/
 *.pyc
+.vercel/
+.DS_Store
+Thumbs.db
+
+# Dependencies & build
+node_modules/
 ui/node_modules/
 ui/dist/
+
+# Knowledge graph / IDE noise
 graphify-out/
-data/cache/
+
+# Local market data (keep on disk for research; do not push)
+data/
+exports/*.xlsx
+exports/parquet_cache/
+exports/strategy_research_report.json
+exports/_summarize_report.py
+*.pkl
+
+# Old / regenerable backtest outputs
+results/
+
+# Logs
+*.log
+npm-debug.log*
+.env.example

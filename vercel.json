@@ -1,0 +1,12 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "ui/dist",
+  "installCommand": "npm install && npm --prefix ui install",
+  "framework": null,
+  "crons": [
+    {
+      "path": "/api/scan",
+      "schedule": "5 0 * * *"
+    }
+  ]
+}

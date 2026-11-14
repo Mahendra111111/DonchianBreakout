@@ -1,0 +1,199 @@
+{
+  "strategies": [
+    "Donchian Breakout",
+    "EMA Trend Following"
+  ],
+  "ranking": [
+    {
+      "strategy": "Donchian Breakout",
+      "avg_net_return_pct_15m": -99.65503198466261,
+      "avg_net_return_pct_1h": -18.65221374100403,
+      "avg_win_rate_15m": 40.738858568769416,
+      "avg_win_rate_1h": 42.52326241186538,
+      "avg_trades_15m": 9800.666666666666,
+      "avg_pf_1h": 0.9546483985506079,
+      "best_cell": {
+        "symbol": "SOLUSDT",
+        "timeframe": "1h",
+        "net_return_pct": 37.92102837879705,
+        "win_rate_pct": 43.5702875399361,
+        "trades": 2504
+      }
+    },
+    {
+      "strategy": "EMA Trend Following",
+      "avg_net_return_pct_15m": -96.77495200735689,
+      "avg_net_return_pct_1h": -21.821890707169853,
+      "avg_win_rate_15m": 37.47264699497916,
+      "avg_win_rate_1h": 40.402440304731606,
+      "avg_trades_15m": 3464.6666666666665,
+      "avg_pf_1h": 0.894689137534446,
+      "best_cell": {
+        "symbol": "SOLUSDT",
+        "timeframe": "1h",
+        "net_return_pct": 13.587532567632543,
+        "win_rate_pct": 43.69426751592357,
+        "trades": 785
+      }
+    }
+  ],
+  "results": [
+    {
+      "strategy": "EMA Trend Following",
+      "symbol": "BTCUSDT",
+      "timeframe": "15m",
+      "trades": 3459,
+      "win_rate_pct": 37.23619543220584,
+      "net_return_pct": -98.45138321809344,
+      "profit_factor": 0.6590514530039964,
+      "max_dd_pct": 98.546037599049,
+      "expectancy": -2.8462383121738517,
+      "final_equity": 154.86167819065565,
+      "stop_exit_pct": 57.87799942179821
+    },
+    {
+      "strategy": "Donchian Breakout",
+      "symbol": "BTCUSDT",
+      "timeframe": "15m",
+      "trades": 9758,
+      "win_rate_pct": 39.649518343922935,
+      "net_return_pct": -99.99226935508531,
+      "profit_factor": 0.7511220670773072,
+      "max_dd_pct": 99.9929668610738,
+      "expectancy": -1.024720940306269,
+      "final_equity": 0.7730644914685826,
+      "stop_exit_pct": 58.29063332650133
+    },
+    {
+      "strategy": "EMA Trend Following",
+      "symbol": "ETHUSDT",
+      "timeframe": "15m",
+      "trades": 3537,
+      "win_rate_pct": 36.92394684761097,
+      "net_return_pct": -98.17587447083793,
+      "profit_factor": 0.6775610210321167,
+      "max_dd_pct": 98.2417570785206,
+      "expectancy": -2.7756820602442156,
+      "final_equity": 182.412552916207,
+      "stop_exit_pct": 57.36499858637263
+    },
+    {
+      "strategy": "Donchian Breakout",
+      "symbol": "ETHUSDT",
+      "timeframe": "15m",
+      "trades": 9502,
+      "win_rate_pct": 41.08608713954957,
+      "net_return_pct": -99.8644741746841,
+      "profit_factor": 0.8568912665726527,
+      "max_dd_pct": 99.87274248079648,
+      "expectancy": -1.0509837315794994,
+      "final_equity": 13.552582531589652,
+      "stop_exit_pct": 56.882761523889705
+    },
+    {
+      "strategy": "EMA Trend Following",
+      "symbol": "SOLUSDT",
+      "timeframe": "15m",
+      "trades": 3398,
+      "win_rate_pct": 38.25779870512066,
+      "net_return_pct": -93.69759833313933,
+      "profit_factor": 0.8041246338111906,
+      "max_dd_pct": 93.83483362387078,
+      "expectancy": -2.7574337355249936,
+      "final_equity": 630.2401666860667,
+      "stop_exit_pct": 57.298410829899936
+    },
+    {
+      "strategy": "Donchian Breakout",
+      "symbol": "SOLUSDT",
+      "timeframe": "15m",
+      "trades": 10142,
+      "win_rate_pct": 41.48097022283574,
+      "net_return_pct": -99.10835242421844,
+      "profit_factor": 0.899761059656172,
+      "max_dd_pct": 99.2401110152208,
+      "expectancy": -0.9772071822541765,
+      "final_equity": 89.16475757815577,
+      "stop_exit_pct": 56.36955235653717
+    },
+    {
+      "strategy": "EMA Trend Following",
+      "symbol": "BTCUSDT",
+      "timeframe": "1h",
+      "trades": 852,
+      "win_rate_pct": 37.79342723004695,
+      "net_return_pct": -50.380861425436684,
+      "profit_factor": 0.7489916653089619,
+      "max_dd_pct": 55.43038056041903,
+      "expectancy": -5.913246646178014,
+      "final_equity": 4961.913857456331,
+      "stop_exit_pct": 57.74647887323944
+    },
+    {
+      "strategy": "Donchian Breakout",
+      "symbol": "BTCUSDT",
+      "timeframe": "1h",
+      "trades": 2386,
+      "win_rate_pct": 42.4140821458508,
+      "net_return_pct": -51.634318873500305,
+      "profit_factor": 0.907014683860858,
+      "max_dd_pct": 58.383223313051005,
+      "expectancy": -2.164053599057032,
+      "final_equity": 4836.568112649969,
+      "stop_exit_pct": 55.238893545683155
+    },
+    {
+      "strategy": "EMA Trend Following",
+      "symbol": "ETHUSDT",
+      "timeframe": "1h",
+      "trades": 856,
+      "win_rate_pct": 39.719626168224295,
+      "net_return_pct": -28.672343263705415,
+      "profit_factor": 0.8856089633072053,
+      "max_dd_pct": 36.39591601128262,
+      "expectancy": -3.349572811180521,
+      "final_equity": 7132.765673629458,
+      "stop_exit_pct": 54.556074766355145
+    },
+    {
+      "strategy": "Donchian Breakout",
+      "symbol": "ETHUSDT",
+      "timeframe": "1h",
+      "trades": 2359,
+      "win_rate_pct": 41.585417549809236,
+      "net_return_pct": -42.243350728308826,
+      "profit_factor": 0.914270198916333,
+      "max_dd_pct": 57.94246173462076,
+      "expectancy": -1.7907312729253186,
+      "final_equity": 5775.664927169118,
+      "stop_exit_pct": 56.634167019923694
+    },
+    {
+      "strategy": "EMA Trend Following",
+      "symbol": "SOLUSDT",
+      "timeframe": "1h",
+      "trades": 785,
+      "win_rate_pct": 43.69426751592357,
+      "net_return_pct": 13.587532567632543,
+      "profit_factor": 1.0494667839871707,
+      "max_dd_pct": 16.891259672806676,
+      "expectancy": 1.7308958684882276,
+      "final_equity": 11358.753256763255,
+      "stop_exit_pct": 53.2484076433121
+    },
+    {
+      "strategy": "Donchian Breakout",
+      "symbol": "SOLUSDT",
+      "timeframe": "1h",
+      "trades": 2504,
+      "win_rate_pct": 43.5702875399361,
+      "net_return_pct": 37.92102837879705,
+      "profit_factor": 1.042660312874633,
+      "max_dd_pct": 14.313621560721659,
+      "expectancy": 1.5144180662459268,
+      "final_equity": 13792.102837879705,
+      "stop_exit_pct": 54.55271565495208
+    }
+  ],
+  "updated": "2026-11-14T06:47:49.788919+00:00"
+}

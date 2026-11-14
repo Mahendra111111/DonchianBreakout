@@ -1,122 +1,45 @@
 #!/usr/bin/env python3
-"""Live backtest API: market data from cache/Supabase, results kept in memory only (not saved)."""
+"""Local API for EMA + Donchian research results and live signal scan."""
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import threading
-import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-
-from backtest_strategy import indicators, run_backtest
-from supabase_data import load_funding, load_ohlcv
 
 HOST = '127.0.0.1'
 PORT = 8765
+ROOT = Path(__file__).resolve().parent
+SUMMARY = ROOT / 'ui' / 'public' / 'strategy_summary.json'
+STRATEGIES = ('EMA Trend Following', 'Donchian Breakout')
 SYMBOLS = ('BTCUSDT', 'ETHUSDT', 'SOLUSDT')
-# Closer target (1.2R) favors win rate; 1.5R kept for comparison.
-RR_VALUES = (1.2, 1.5)
 
 _state_lock = threading.Lock()
-_state = {
-    'ready': False,
-    'running': False,
-    'error': None,
-    'progress': 'starting',
-    'results': {},  # key: f'{symbol}|{rr}' -> {summary, trades}
-}
+_state: dict = {'last_scan': None}
 
 
-def _public_trade(row: dict) -> dict:
-    pnl = float(row.get('net_pnl') or 0)
-    return {
-        'entry_time': row.get('entry_time'),
-        'exit_time': row.get('exit_time'),
-        'side_text': row.get('side_text'),
-        'entry': row.get('entry'),
-        'exit': row.get('exit'),
-        'exit_reason': row.get('exit_reason'),
-        'outcome': 'successful' if pnl > 0 else 'failed',
-    }
+def _load_summary() -> dict:
+    if not SUMMARY.exists():
+        raise FileNotFoundError(
+            f'Missing {SUMMARY}. Run: python strategy_research_report.py'
+        )
+    return json.loads(SUMMARY.read_text(encoding='utf-8'))
 
 
-def _public_summary(symbol: str, rr: float, metrics: dict, trades: list[dict], data_source: str) -> dict:
-    successful = sum(1 for t in trades if t['outcome'] == 'successful')
-    failed = len(trades) - successful
-    return {
-        'symbol': symbol,
-        'rr': rr,
-        'data_source': data_source,
-        'candles': metrics.get('candles'),
-        'funding_records': metrics.get('funding_records'),
-        'data_start': metrics.get('data_start'),
-        'data_end': metrics.get('data_end'),
-        'total': len(trades),
-        'successful': successful,
-        'failed': failed,
-        'success_rate_pct': round((successful / len(trades)) * 100, 2) if trades else None,
-    }
-
-
-def _set_progress(msg: str) -> None:
-    with _state_lock:
-        _state['progress'] = msg
-    print(msg, flush=True)
-
-
-def run_all_backtests() -> None:
-    with _state_lock:
-        _state['running'] = True
-        _state['ready'] = False
-        _state['error'] = None
-        _state['results'] = {}
-    try:
-        # BTCUSDT first so the UI can show results while ETH/SOL still load.
-        for symbol in SYMBOLS:
-            _set_progress(f'Loading {symbol} market data (cache or Supabase)…')
-            raw, ohlcv_src = load_ohlcv(symbol)
-            funding, funding_src = load_funding(symbol)
-            source_label = (
-                f'cache:ohlcv_15m+funding_rates'
-                if ohlcv_src == 'cache' and funding_src == 'cache'
-                else f'{ohlcv_src}+{funding_src}:ohlcv_15m+funding_rates'
-            )
-            _set_progress(f'Computing indicators for {symbol} ({source_label})…')
-            x = indicators(raw)
-            for rr in RR_VALUES:
-                _set_progress(f'Backtesting {symbol} @ {rr}R…')
-                metrics, trades_df, _curve = run_backtest(
-                    x, initial_equity=10000.0, risk_pct=0.005, rr=rr,
-                    fee_rate=0.0005, slippage=0.0002, funding=funding,
-                )
-                metrics.update({
-                    'symbol': symbol,
-                    'rr': rr,
-                    'candles': int(len(x)),
-                    'funding_records': int(len(funding)),
-                    'data_start': x.index.min().isoformat(),
-                    'data_end': x.index.max().isoformat(),
-                })
-                trade_rows = trades_df.to_dict(orient='records') if not trades_df.empty else []
-                public_trades = [_public_trade(t) for t in trade_rows]
-                payload = {
-                    'summary': _public_summary(symbol, rr, metrics, public_trades, source_label),
-                    'trades': public_trades,
-                }
-                with _state_lock:
-                    _state['results'][f'{symbol}|{rr}'] = payload
-        with _state_lock:
-            _state['ready'] = True
-            _state['progress'] = 'ready'
-        _set_progress('All live backtests ready (in memory, not saved to disk).')
-    except Exception as e:
-        with _state_lock:
-            _state['error'] = str(e)
-            _state['progress'] = 'error'
-        traceback.print_exc()
-    finally:
-        with _state_lock:
-            _state['running'] = False
+def _run_node_scan(notify: bool) -> dict:
+    args = ['node', str(ROOT / 'scripts' / 'run_scan.mjs')]
+    if not notify:
+        args.append('--no-notify')
+    env = os.environ.copy()
+    proc = subprocess.run(
+        args, cwd=str(ROOT), capture_output=True, text=True, env=env, check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or 'scan failed')
+    return json.loads(proc.stdout)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -125,8 +48,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _cors(self) -> None:
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
 
     def _json(self, code: int, payload: dict) -> None:
         body = json.dumps(payload).encode('utf-8')
@@ -142,53 +65,99 @@ class Handler(BaseHTTPRequestHandler):
         self._cors()
         self.end_headers()
 
+    def do_POST(self) -> None:  # noqa: N802
+        self.do_GET()
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path
         qs = parse_qs(parsed.query)
 
         if path in ('/api/health', '/api/status'):
-            with _state_lock:
-                self._json(200, {
-                    'ready': _state['ready'],
-                    'running': _state['running'],
-                    'progress': _state['progress'],
-                    'error': _state['error'],
-                    'symbols': list(SYMBOLS),
-                    'rr': list(RR_VALUES),
-                })
+            self._json(200, {
+                'ok': True,
+                'ready': SUMMARY.exists(),
+                'strategies': list(STRATEGIES),
+                'symbols': list(SYMBOLS),
+                'service': 'crypto-ema-donchian-local',
+            })
+            return
+
+        if path == '/api/signals':
+            try:
+                result = _run_node_scan(notify=False)
+                with _state_lock:
+                    _state['last_scan'] = result
+                self._json(200, result)
+            except Exception as e:
+                self._json(500, {'error': str(e)})
+            return
+
+        if path == '/api/scan':
+            try:
+                notify = (qs.get('notify') or ['1'])[0] != '0'
+                result = _run_node_scan(notify=notify)
+                with _state_lock:
+                    _state['last_scan'] = result
+                self._json(200, result)
+            except Exception as e:
+                self._json(500, {'error': str(e)})
             return
 
         if path == '/api/results':
-            symbol = (qs.get('symbol') or ['BTCUSDT'])[0].upper()
+            symbol = (qs.get('symbol') or ['SOLUSDT'])[0].upper()
+            strategy = (qs.get('strategy') or ['Donchian Breakout'])[0]
+            timeframe = (qs.get('timeframe') or ['1h'])[0]
             try:
-                rr = float((qs.get('rr') or ['1.5'])[0])
-            except ValueError:
-                self._json(400, {'error': 'rr must be a number'})
+                data = _load_summary()
+            except Exception as e:
+                self._json(500, {'error': str(e), 'ready': False})
                 return
-            key = f'{symbol}|{rr}'
-            with _state_lock:
-                if _state['error'] and not _state['ready']:
-                    self._json(500, {'error': _state['error'], 'progress': _state['progress']})
-                    return
-                if key not in _state['results']:
-                    self._json(202, {
-                        'ready': False,
-                        'running': _state['running'],
-                        'progress': _state['progress'],
-                        'error': _state['error'],
-                    })
-                    return
-                self._json(200, _state['results'][key])
+            rows = [
+                r for r in data.get('results', [])
+                if r.get('symbol') == symbol and r.get('strategy') == strategy and r.get('timeframe') == timeframe
+            ]
+            if not rows:
+                self._json(404, {
+                    'error': 'no research row for this selection',
+                    'strategies': data.get('strategies'),
+                })
+                return
+            row = rows[0]
+            wr = row.get('win_rate_pct')
+            trades = int(row.get('trades') or 0)
+            successful = int(round((wr / 100) * trades)) if wr is not None else None
+            self._json(200, {
+                'ready': True,
+                'summary': {
+                    'symbol': symbol,
+                    'strategy': strategy,
+                    'timeframe': timeframe,
+                    'trades': trades,
+                    'successful': successful,
+                    'failed': (trades - successful) if successful is not None else None,
+                    'success_rate_pct': round(wr, 2) if wr is not None else None,
+                    'net_return_pct': row.get('net_return_pct'),
+                    'profit_factor': row.get('profit_factor'),
+                    'max_dd_pct': row.get('max_dd_pct'),
+                    'expectancy': row.get('expectancy'),
+                    'final_equity': row.get('final_equity'),
+                    'stop_exit_pct': row.get('stop_exit_pct'),
+                    'data_source': 'research:strategy_summary.json',
+                },
+                'ranking': data.get('ranking'),
+                'updated': data.get('updated'),
+            })
             return
 
         self._json(404, {'error': 'not found'})
 
 
 def main() -> None:
-    threading.Thread(target=run_all_backtests, daemon=True).start()
+    if not SUMMARY.exists():
+        print(f'WARNING: {SUMMARY} missing — run python strategy_research_report.py', flush=True)
     server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f'Live backtest API on http://{HOST}:{PORT} (cache/Supabase market data, results memory-only)', flush=True)
+    print(f'EMA+Donchian API on http://{HOST}:{PORT}', flush=True)
     server.serve_forever()
 
 

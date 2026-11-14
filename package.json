@@ -1,0 +1,11 @@
+{
+  "name": "crypto-ema-donchian",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm --prefix ui install && npm --prefix ui run build",
+    "dev": "npm --prefix ui run dev",
+    "scan": "node scripts/run_scan.mjs",
+    "research": "python -u strategy_research_report.py"
+  }
+}

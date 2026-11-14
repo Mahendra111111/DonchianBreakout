@@ -1,111 +1,127 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
-const RR_OPTIONS = [
-  { label: '1.2R', value: 1.2 },
-  { label: '1.5R', value: 1.5 },
-]
+const STRATEGIES = ['Donchian Breakout', 'EMA Trend Following']
+const TIMEFRAMES = ['1h', '15m']
 
-function isSuccessful(trade) {
-  return trade.outcome === 'successful'
+function fmtPct(n) {
+  if (n == null || Number.isNaN(n)) return '—'
+  const v = Number(n)
+  const sign = v > 0 ? '+' : ''
+  return `${sign}${v.toFixed(2)}%`
 }
 
-function fmtTime(iso) {
-  if (!iso) return '—'
-  return String(iso).replace('T', ' ').replace('+00:00', ' UTC')
+function fmtTime(ms) {
+  if (!ms) return '—'
+  return new Date(ms).toISOString().replace('T', ' ').replace('.000Z', ' UTC')
 }
 
 export default function App() {
-  const [symbol, setSymbol] = useState('BTCUSDT')
-  const [rr, setRr] = useState(1.2)
-  const [filter, setFilter] = useState('all')
-  const [sideFilter, setSideFilter] = useState('all')
+  const [symbol, setSymbol] = useState('SOLUSDT')
+  const [strategy, setStrategy] = useState('Donchian Breakout')
+  const [timeframe, setTimeframe] = useState('1h')
   const [summary, setSummary] = useState(null)
-  const [trades, setTrades] = useState([])
+  const [ranking, setRanking] = useState([])
+  const [signals, setSignals] = useState([])
+  const [scanMeta, setScanMeta] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [progress, setProgress] = useState('Connecting…')
   const [error, setError] = useState('')
-  const [page, setPage] = useState(0)
-  const pageSize = 50
+  const [scanBusy, setScanBusy] = useState(false)
+  const [scanMsg, setScanMsg] = useState('')
 
   useEffect(() => {
     let cancelled = false
-    let timer
-
     async function load() {
       setLoading(true)
       setError('')
-      setPage(0)
       try {
-        const res = await fetch(`/api/results?symbol=${encodeURIComponent(symbol)}&rr=${rr}`)
+        const qs = new URLSearchParams({ symbol, strategy, timeframe })
+        const res = await fetch(`/api/results?${qs}`)
         const data = await res.json()
         if (cancelled) return
-
-        if (res.status === 202 || data.ready === false) {
-          setSummary(null)
-          setTrades([])
-          setProgress(data.progress || 'Running backtest from Supabase…')
-          timer = setTimeout(load, 2000)
-          return
-        }
-        if (!res.ok) {
-          throw new Error(data.error || `API error ${res.status}`)
-        }
+        if (!res.ok) throw new Error(data.error || `API ${res.status}`)
         setSummary(data.summary)
-        setTrades(data.trades || [])
-        setProgress(data.summary?.data_source || 'supabase')
+        setRanking(data.ranking || [])
       } catch (e) {
         if (!cancelled) {
           setSummary(null)
-          setTrades([])
-          setError(e.message || 'Failed to load live results')
-          setProgress('Waiting for API…')
-          timer = setTimeout(load, 2500)
+          setError(e.message || 'Failed to load research results')
         }
       } finally {
         if (!cancelled) setLoading(false)
       }
     }
-
     load()
+    return () => { cancelled = true }
+  }, [symbol, strategy, timeframe])
+
+  useEffect(() => {
+    let cancelled = false
+    async function poll() {
+      try {
+        const res = await fetch('/api/signals')
+        const data = await res.json()
+        if (cancelled || !res.ok) return
+        setSignals(data.signals || [])
+        setScanMeta({
+          scannedAt: data.scannedAt,
+          telegramConfigured: data.telegramConfigured,
+          timeframe: data.timeframe,
+        })
+      } catch {
+        /* ignore poll errors */
+      }
+    }
+    poll()
+    const t = setInterval(poll, 60_000)
     return () => {
       cancelled = true
-      if (timer) clearTimeout(timer)
+      clearInterval(t)
     }
-  }, [symbol, rr])
+  }, [])
 
-  const filtered = useMemo(() => {
-    return trades.filter((t) => {
-      const ok = isSuccessful(t)
-      if (filter === 'successful' && !ok) return false
-      if (filter === 'failed' && ok) return false
-      if (sideFilter !== 'all' && t.side_text !== sideFilter) return false
-      return true
-    })
-  }, [trades, filter, sideFilter])
-
-  const counts = useMemo(() => {
-    let successful = 0
-    let failed = 0
-    for (const t of trades) {
-      if (isSuccessful(t)) successful += 1
-      else failed += 1
+  async function triggerScan() {
+    setScanBusy(true)
+    setScanMsg('')
+    try {
+      const res = await fetch('/api/scan?notify=1')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || `Scan ${res.status}`)
+      setSignals(data.signals || [])
+      setScanMeta({
+        scannedAt: data.scannedAt,
+        telegramConfigured: data.telegramConfigured,
+        timeframe: data.timeframe,
+      })
+      setScanMsg(
+        data.telegramConfigured
+          ? `Scan done · ${data.signalCount} signal(s) · ${data.notifyCount} Telegram sent`
+          : `Scan done · ${data.signalCount} signal(s) · Telegram not configured`,
+      )
+    } catch (e) {
+      setScanMsg(e.message || 'Scan failed')
+    } finally {
+      setScanBusy(false)
     }
-    return { successful, failed, total: trades.length }
-  }, [trades])
-
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
-  const pageRows = filtered.slice(page * pageSize, (page + 1) * pageSize)
+  }
 
   return (
     <div className="app">
       <header className="top">
         <div>
-          <p className="eyebrow">Live Supabase Backtest</p>
-          <h1>Trade Results</h1>
+          <p className="eyebrow">EMA + Donchian</p>
+          <h1>Strategy Desk</h1>
         </div>
         <div className="controls">
+          <label>
+            Strategy
+            <select value={strategy} onChange={(e) => setStrategy(e.target.value)}>
+              {STRATEGIES.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </label>
           <label>
             Symbol
             <select value={symbol} onChange={(e) => setSymbol(e.target.value)}>
@@ -115,134 +131,129 @@ export default function App() {
             </select>
           </label>
           <label>
-            Take-profit
-            <select value={rr} onChange={(e) => setRr(Number(e.target.value))}>
-              {RR_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
+            Timeframe
+            <select value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
+              {TIMEFRAMES.map((t) => (
+                <option key={t} value={t}>{t}</option>
               ))}
             </select>
           </label>
-          <label>
-            Outcome
-            <select value={filter} onChange={(e) => { setFilter(e.target.value); setPage(0) }}>
-              <option value="all">All trades</option>
-              <option value="successful">Successful only</option>
-              <option value="failed">Failed only</option>
-            </select>
-          </label>
-          <label>
-            Side
-            <select value={sideFilter} onChange={(e) => { setSideFilter(e.target.value); setPage(0) }}>
-              <option value="all">Long + Short</option>
-              <option value="LONG">Long</option>
-              <option value="SHORT">Short</option>
-            </select>
-          </label>
+          <button type="button" className="scan-btn" disabled={scanBusy} onClick={triggerScan}>
+            {scanBusy ? 'Scanning…' : 'Scan + Telegram'}
+          </button>
         </div>
       </header>
 
       {error && <div className="banner error">{error}</div>}
-      {(loading || !summary) && !error && (
-        <div className="banner">{progress}</div>
-      )}
+      {loading && !summary && !error && <div className="banner">Loading research…</div>}
+      {scanMsg && <div className="banner">{scanMsg}</div>}
 
       {summary && (
-        <>
-          <section className="stats">
-            <article>
-              <span>Total trades</span>
-              <strong>{counts.total}</strong>
-            </article>
-            <article>
-              <span>Successful trades</span>
-              <strong className="up">{counts.successful}</strong>
-            </article>
-            <article>
-              <span>Failed trades</span>
-              <strong className="down">{counts.failed}</strong>
-            </article>
-            <article>
-              <span>Success rate</span>
-              <strong>
-                {summary.success_rate_pct != null ? `${summary.success_rate_pct}%` : '—'}
-              </strong>
-            </article>
-            <article>
-              <span>Data source</span>
-              <strong className="source">{summary.data_source}</strong>
-            </article>
-            <article>
-              <span>Candles used</span>
-              <strong>{summary.candles?.toLocaleString?.() ?? summary.candles ?? '—'}</strong>
-            </article>
-          </section>
+        <section className="stats">
+          <article>
+            <span>Net return (5y research)</span>
+            <strong className={summary.net_return_pct >= 0 ? 'up' : 'down'}>
+              {fmtPct(summary.net_return_pct)}
+            </strong>
+          </article>
+          <article>
+            <span>Win rate</span>
+            <strong>{summary.success_rate_pct != null ? `${summary.success_rate_pct}%` : '—'}</strong>
+          </article>
+          <article>
+            <span>Trades</span>
+            <strong>{summary.trades?.toLocaleString?.() ?? summary.trades}</strong>
+          </article>
+          <article>
+            <span>Profit factor</span>
+            <strong>{summary.profit_factor != null ? Number(summary.profit_factor).toFixed(3) : '—'}</strong>
+          </article>
+          <article>
+            <span>Max drawdown</span>
+            <strong className="down">{fmtPct(summary.max_dd_pct)}</strong>
+          </article>
+          <article>
+            <span>Stop exits</span>
+            <strong>{summary.stop_exit_pct != null ? `${Number(summary.stop_exit_pct).toFixed(1)}%` : '—'}</strong>
+          </article>
+        </section>
+      )}
 
-          <section className="table-wrap">
-            <div className="table-head">
-              <h2>
-                Trades
-                <span>{filtered.length} shown</span>
-              </h2>
-              <div className="pager">
-                <button type="button" disabled={page <= 0} onClick={() => setPage((p) => p - 1)}>Prev</button>
-                <span>{page + 1} / {pageCount}</span>
-                <button type="button" disabled={page >= pageCount - 1} onClick={() => setPage((p) => p + 1)}>Next</button>
-              </div>
-            </div>
-            <div className="scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Side</th>
-                    <th>Entry</th>
-                    <th>Exit</th>
-                    <th>Reason</th>
-                    <th>Outcome</th>
+      <section className="table-wrap">
+        <div className="table-head">
+          <h2>
+            Live signals
+            <span>
+              {scanMeta?.telegramConfigured ? 'Telegram on' : 'Telegram off'}
+              {scanMeta?.scannedAt ? ` · ${fmtTime(Date.parse(scanMeta.scannedAt))}` : ''}
+            </span>
+          </h2>
+        </div>
+        <div className="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Strategy</th>
+                <th>Side</th>
+                <th>Close</th>
+                <th>Bar</th>
+              </tr>
+            </thead>
+            <tbody>
+              {signals.map((s) => (
+                <tr key={`${s.symbol}-${s.strategy}-${s.side}-${s.barTime}`}>
+                  <td>{s.symbol}</td>
+                  <td>{s.strategy}</td>
+                  <td>
+                    <span className={`side ${s.side === 'LONG' ? 'long' : 'short'}`}>{s.side}</span>
+                  </td>
+                  <td>{Number(s.close).toFixed(4)}</td>
+                  <td>{fmtTime(s.barTime)}</td>
+                </tr>
+              ))}
+              {signals.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="empty">No entry signal on the last closed {scanMeta?.timeframe || '1h'} bar.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {ranking.length > 0 && (
+        <section className="table-wrap">
+          <div className="table-head">
+            <h2>Research ranking <span>EMA + Donchian only</span></h2>
+          </div>
+          <div className="scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Strategy</th>
+                  <th>Avg 1h</th>
+                  <th>Avg 15m</th>
+                  <th>Best cell</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ranking.map((r) => (
+                  <tr key={r.strategy}>
+                    <td>{r.strategy}</td>
+                    <td className={r.avg_net_return_pct_1h >= 0 ? 'up' : 'down'}>{fmtPct(r.avg_net_return_pct_1h)}</td>
+                    <td className={r.avg_net_return_pct_15m >= 0 ? 'up' : 'down'}>{fmtPct(r.avg_net_return_pct_15m)}</td>
+                    <td>
+                      {r.best_cell
+                        ? `${r.best_cell.symbol} ${r.best_cell.timeframe} (${fmtPct(r.best_cell.net_return_pct)})`
+                        : '—'}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {pageRows.map((t, i) => {
-                    const ok = isSuccessful(t)
-                    return (
-                      <tr key={`${t.entry_time}-${i}`} className={ok ? 'row-win' : 'row-loss'}>
-                        <td>{page * pageSize + i + 1}</td>
-                        <td>
-                          <span className={`side ${t.side_text === 'LONG' ? 'long' : 'short'}`}>
-                            {t.side_text}
-                          </span>
-                        </td>
-                        <td>
-                          <div className="stack">
-                            <span>{Number(t.entry).toFixed(2)}</span>
-                            <small>{fmtTime(t.entry_time)}</small>
-                          </div>
-                        </td>
-                        <td>
-                          <div className="stack">
-                            <span>{Number(t.exit).toFixed(2)}</span>
-                            <small>{fmtTime(t.exit_time)}</small>
-                          </div>
-                        </td>
-                        <td>{t.exit_reason}</td>
-                        <td>
-                          <span className={`badge ${ok ? 'win' : 'loss'}`}>
-                            {ok ? 'Successful' : 'Failed'}
-                          </span>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                  {pageRows.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="empty">No trades match this filter.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
     </div>
   )

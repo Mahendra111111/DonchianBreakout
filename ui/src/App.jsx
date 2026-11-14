@@ -241,7 +241,7 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false
-    async function poll() {
+    async function pollList() {
       try {
         const res = await fetch('/api/signals')
         const data = await res.json()
@@ -253,16 +253,44 @@ export default function App() {
           telegramConfigured: data.telegramConfigured,
           timeframe: data.timeframe,
           recentDays: data.recentDays,
+          recentHours: data.recentHours,
         })
       } catch {
         /* ignore */
       }
     }
-    poll()
-    const t = setInterval(poll, 60_000)
+    // While desk is open: live Telegram for fresh closed bars only (Hobby-safe; no Vercel hourly cron)
+    async function pollLiveNotify() {
+      try {
+        const res = await fetch('/api/scan?notify=1&desk=1')
+        const data = await res.json()
+        if (cancelled || !res.ok) return
+        setSignals(data.signals || [])
+        setRecent(data.recent || [])
+        setScanMeta({
+          scannedAt: data.scannedAt,
+          telegramConfigured: data.telegramConfigured,
+          timeframe: data.timeframe,
+          recentDays: data.recentDays,
+          recentHours: data.recentHours,
+        })
+        if (data.notifyCount > 0) {
+          setScanMsg(`Live alert · ${data.notifyCount} Telegram message(s) · ${data.timeframe || '1h'}`)
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    pollList()
+    const listTimer = setInterval(pollList, 60_000)
+    const liveTimer = setInterval(pollLiveNotify, 3 * 60_000)
+    // First live check shortly after open (not immediate flood)
+    const firstLive = setTimeout(pollLiveNotify, 15_000)
     return () => {
       cancelled = true
-      clearInterval(t)
+      clearInterval(listTimer)
+      clearInterval(liveTimer)
+      clearTimeout(firstLive)
     }
   }, [])
 
@@ -285,7 +313,7 @@ export default function App() {
         recentHours: data.recentHours,
       })
       setScanMsg(
-        `Last ${data.recentHours || 24}h · ${data.recentCount || 0} real closed-bar signal(s) on ${data.timeframe || '1h'} watchlist · Telegram live alerts via hourly cron (not Scan)`,
+        `Last ${data.recentHours || 24}h · ${data.recentCount || 0} real signal(s) · Telegram: keep desk open or GitHub hourly Action (Hobby Vercel = 1 cron/day)`,
       )
       setTesterTab('signals')
     } catch (e) {

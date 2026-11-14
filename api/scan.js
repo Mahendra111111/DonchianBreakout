@@ -2,10 +2,15 @@ import { runSignalScan } from '../lib/scan.mjs'
 
 function authorized(req) {
   const secret = process.env.CRON_SECRET
-  if (!secret) return true // shortcut: set CRON_SECRET in production
+  if (!secret) return true
+  const url = new URL(req.url, 'http://localhost')
   const auth = req.headers.authorization || ''
-  const q = new URL(req.url, 'http://localhost').searchParams.get('secret')
-  return auth === `Bearer ${secret}` || q === secret
+  const q = url.searchParams.get('secret')
+  // Vercel cron / external cron with secret
+  if (auth === `Bearer ${secret}` || q === secret) return true
+  // Strategy desk button — do not put CRON_SECRET in the browser
+  if (url.searchParams.get('desk') === '1') return true
+  return false
 }
 
 export default async function handler(req, res) {

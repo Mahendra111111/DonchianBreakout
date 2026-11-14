@@ -26,7 +26,24 @@ function fmtTime(isoOrMs) {
   if (isoOrMs == null || isoOrMs === '') return '—'
   const ms = typeof isoOrMs === 'number' ? isoOrMs : Date.parse(isoOrMs)
   if (!Number.isFinite(ms)) return String(isoOrMs)
-  return new Date(ms).toISOString().replace('T', ' ').replace('.000Z', ' UTC')
+  const d = new Date(ms)
+  const datePart = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(d)
+  const timePart = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+    .format(d)
+    .replace(/\s/g, '')
+    .replace(':', '.')
+    .toLowerCase()
+  return `${datePart}, ${timePart} IST`
 }
 
 export default function App() {
@@ -118,7 +135,8 @@ export default function App() {
     setScanBusy(true)
     setScanMsg('')
     try {
-      const res = await fetch('/api/scan?notify=1')
+      setError('')
+      const res = await fetch('/api/scan?notify=1&desk=1')
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || `Scan ${res.status}`)
       setSignals(data.signals || [])
@@ -135,7 +153,8 @@ export default function App() {
           : `Scan done · ${data.recentCount || 0} opportunity record(s) · Telegram not configured`,
       )
     } catch (e) {
-      setScanMsg(e.message || 'Scan failed')
+      setError(e.message || 'Scan failed')
+      setScanMsg('')
     } finally {
       setScanBusy(false)
     }

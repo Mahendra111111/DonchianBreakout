@@ -418,6 +418,7 @@ export default function App() {
           trade={selectedTrade}
           symbol={symbol}
           timeframe={timeframe}
+          strategy={strategy}
           tradeIndex={selectedIdx}
           tradeCount={tradeList.length}
           onClose={() => setSelectedIdx(null)}

@@ -4,8 +4,10 @@ import {
   ColorType,
   createChart,
   createSeriesMarkers,
+  LineSeries,
 } from 'lightweight-charts'
 import { fmtTime, toMs, tradingViewUrl } from './fmtTime'
+import { strategyOverlays } from './strategyIndicators'
 
 function barTimeSec(isoOrMs, timeframe) {
   const ms = toMs(isoOrMs)
@@ -17,6 +19,7 @@ export default function TradeChartModal({
   trade,
   symbol,
   timeframe,
+  strategy,
   tradeIndex,
   tradeCount,
   onClose,
@@ -88,7 +91,22 @@ export default function TradeChartModal({
           wickUpColor: '#3dba7a',
           wickDownColor: '#e35d5d',
         })
-        series.setData(candles)
+        series.setData(candles.map(({ time, open, high, low, close }) => ({
+          time, open, high, low, close,
+        })))
+
+        const overlays = strategyOverlays(strategy, candles)
+        for (const line of overlays.lines) {
+          if (!line.data.length) continue
+          const ls = chart.addSeries(LineSeries, {
+            color: line.color,
+            lineWidth: 2,
+            title: line.title,
+            lastValueVisible: true,
+            priceLineVisible: false,
+          })
+          ls.setData(line.data)
+        }
 
         const entryT = barTimeSec(trade.entry_time, timeframe)
         const exitT = barTimeSec(trade.exit_time, timeframe)
@@ -144,7 +162,11 @@ export default function TradeChartModal({
         })
         resizeObs.observe(hostRef.current)
 
-        setMeta({ source: data.source, count: candles.length })
+        setMeta({
+          source: data.source,
+          count: candles.length,
+          indicators: overlays.label || null,
+        })
         setLoading(false)
       } catch (e) {
         if (!cancelled) {
@@ -160,7 +182,7 @@ export default function TradeChartModal({
       resizeObs?.disconnect()
       chart?.remove()
     }
-  }, [trade, symbol, timeframe])
+  }, [trade, symbol, timeframe, strategy])
 
   if (!trade) return null
   const ok = trade.outcome === 'successful'
@@ -178,7 +200,7 @@ export default function TradeChartModal({
         <div className="chart-modal-head">
           <div>
             <h2>
-              {symbol} · {timeframe}
+              {strategy} · {symbol} · {timeframe}
               <span className={`side ${trade.side === 'LONG' ? 'long' : 'short'}`}>{trade.side}</span>
               <span className={`badge ${ok ? 'win' : 'loss'}`}>{ok ? 'Successful' : 'Failed'}</span>
             </h2>
@@ -187,6 +209,7 @@ export default function TradeChartModal({
               {' · '}
               <span className={trade.net >= 0 ? 'up' : 'down'}>{Number(trade.net).toFixed(2)}</span>
               {' · '}{trade.reason}
+              {meta?.indicators ? ` · ${meta.indicators}` : ''}
               {meta ? ` · ${meta.count} bars (${meta.source})` : ''}
             </p>
           </div>
@@ -201,6 +224,11 @@ export default function TradeChartModal({
         {error && <div className="banner error">{error}</div>}
         {loading && !error && <div className="banner">Loading candles…</div>}
         <div className="chart-host" ref={hostRef} />
+        {meta?.indicators && (
+          <div className="chart-legend">
+            Indicators on by default: <strong>{meta.indicators}</strong>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Local one-shot: scan EMA + Donchian and optionally Telegram-notify. */
+/** Local one-shot: scan watchlist and optionally Telegram-notify. */
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -20,6 +20,16 @@ if (existsSync(envPath)) {
   }
 }
 
-const notify = !process.argv.includes('--no-notify')
-const result = await runSignalScan({ notify })
+const args = Object.fromEntries(
+  process.argv.slice(2).map((a) => {
+    const i = a.indexOf('=')
+    return i > 0 ? [a.slice(0, i), a.slice(i + 1)] : [a, '1']
+  }),
+)
+
+const notify = !process.argv.includes('--no-notify') && args.notify !== '0'
+const symbols = args.symbols
+  ? String(args.symbols).split(',').map((s) => s.trim()).filter(Boolean)
+  : undefined
+const result = await runSignalScan({ notify, symbols })
 console.log(JSON.stringify(result, null, 2))

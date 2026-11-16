@@ -51,10 +51,13 @@ def _load_trades(file_name: str | None) -> list:
     return json.loads(path.read_text(encoding='utf-8'))
 
 
-def _run_node_scan(notify: bool) -> dict:
+def _run_node_scan(notify: bool, symbols: str | None = None) -> dict:
     args = ['node', str(ROOT / 'scripts' / 'run_scan.mjs')]
     if not notify:
         args.append('--no-notify')
+        args.append('notify=0')
+    if symbols:
+        args.append(f'symbols={symbols}')
     env = os.environ.copy()
     proc = subprocess.run(
         args, cwd=str(ROOT), capture_output=True, text=True, env=env, check=False,
@@ -94,8 +97,12 @@ def _run_node_ohlcv(symbol: str, timeframe: str, from_ms: int, to_ms: int) -> di
     return json.loads(proc.stdout)
 
 
-def _run_node_ticker(symbol: str) -> dict:
-    args = ['node', str(ROOT / 'scripts' / 'run_ticker.mjs'), f'symbol={symbol}']
+def _run_node_ticker(symbol: str | None = None, symbols: str | None = None) -> dict:
+    args = ['node', str(ROOT / 'scripts' / 'run_ticker.mjs')]
+    if symbols:
+        args.append(f'symbols={symbols}')
+    else:
+        args.append(f'symbol={(symbol or "SOLUSDT").upper()}')
     env = os.environ.copy()
     proc = subprocess.run(
         args, cwd=str(ROOT), capture_output=True, text=True, env=env, check=False,
@@ -105,12 +112,13 @@ def _run_node_ticker(symbol: str) -> dict:
     return json.loads(proc.stdout)
 
 
-def _run_node_live(symbol: str, timeframe: str, strategy: str) -> dict:
+def _run_node_live(symbol: str, timeframe: str, strategy: str, notify: bool = False) -> dict:
     args = [
         'node', str(ROOT / 'scripts' / 'run_live.mjs'),
         f'symbol={symbol}',
         f'timeframe={timeframe}',
         f'strategy={strategy}',
+        f'notify={"1" if notify else "0"}',
     ]
     env = os.environ.copy()
     proc = subprocess.run(
@@ -165,6 +173,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path == '/api/watchlist':
+            length = int(self.headers.get('Content-Length') or 0)
+            raw = self.rfile.read(length) if length else b'{}'
+            try:
+                body = json.loads(raw.decode('utf-8') or '{}')
+            except Exception:
+                body = {}
+            symbols = ','.join(body.get('symbols') or [])
+            try:
+                proc = subprocess.run(
+                    ['node', str(ROOT / 'scripts' / 'run_watchlist.mjs'), f'set={symbols}'],
+                    cwd=str(ROOT), capture_output=True, text=True, env=os.environ.copy(), check=False,
+                )
+                if proc.returncode != 0:
+                    raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or 'watchlist failed')
+                self._json(200, json.loads(proc.stdout))
+            except Exception as e:
+                self._json(400, {'error': str(e)})
+            return
         self.do_GET()
 
     def do_GET(self) -> None:  # noqa: N802
@@ -182,9 +211,37 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
+        if path == '/api/symbols':
+            q = (qs.get('q') or [''])[0]
+            try:
+                proc = subprocess.run(
+                    ['node', str(ROOT / 'scripts' / 'run_symbols.mjs'), f'q={q}'],
+                    cwd=str(ROOT), capture_output=True, text=True, env=os.environ.copy(), check=False,
+                )
+                if proc.returncode != 0:
+                    raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or 'symbols failed')
+                self._json(200, json.loads(proc.stdout))
+            except Exception as e:
+                self._json(500, {'error': str(e)})
+            return
+
+        if path == '/api/watchlist':
+            try:
+                proc = subprocess.run(
+                    ['node', str(ROOT / 'scripts' / 'run_watchlist.mjs')],
+                    cwd=str(ROOT), capture_output=True, text=True, env=os.environ.copy(), check=False,
+                )
+                if proc.returncode != 0:
+                    raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or 'watchlist failed')
+                self._json(200, json.loads(proc.stdout))
+            except Exception as e:
+                self._json(500, {'error': str(e)})
+            return
+
         if path == '/api/signals':
             try:
-                result = _run_node_scan(notify=False)
+                symbols = (qs.get('symbols') or [None])[0]
+                result = _run_node_scan(notify=False, symbols=symbols)
                 with _state_lock:
                     _state['last_scan'] = result
                 self._json(200, result)
@@ -195,7 +252,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/scan':
             try:
                 notify = (qs.get('notify') or ['1'])[0] != '0'
-                result = _run_node_scan(notify=notify)
+                symbols = (qs.get('symbols') or [None])[0]
+                result = _run_node_scan(notify=notify, symbols=symbols)
                 with _state_lock:
                     _state['last_scan'] = result
                 self._json(200, result)
@@ -205,8 +263,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == '/api/ticker':
             symbol = (qs.get('symbol') or ['SOLUSDT'])[0].upper()
+            symbols = (qs.get('symbols') or [None])[0]
             try:
-                self._json(200, _run_node_ticker(symbol))
+                self._json(200, _run_node_ticker(symbol=symbol, symbols=symbols))
             except Exception as e:
                 self._json(500, {'error': str(e)})
             return
@@ -215,8 +274,9 @@ class Handler(BaseHTTPRequestHandler):
             symbol = (qs.get('symbol') or ['SOLUSDT'])[0].upper()
             timeframe = (qs.get('timeframe') or ['1h'])[0]
             strategy = (qs.get('strategy') or ['Donchian Breakout'])[0]
+            notify = (qs.get('notify') or ['0'])[0] == '1'
             try:
-                self._json(200, _run_node_live(symbol, timeframe, strategy))
+                self._json(200, _run_node_live(symbol, timeframe, strategy, notify=notify))
             except Exception as e:
                 self._json(500, {'error': str(e)})
             return

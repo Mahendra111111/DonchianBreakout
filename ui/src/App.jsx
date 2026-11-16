@@ -2,11 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { fmtTime } from './fmtTime'
 import LiveDesk from './LiveDesk'
+import { resolveTradableSymbol } from './symbolResolve'
 import SymbolSearch from './SymbolSearch'
 import TradeChartModal from './TradeChartModal'
 import { SUPPORTED_TIMEFRAMES } from './timeframes'
 
-const FAVORITE_SYMBOLS = [
+const WATCH_W_KEY = 'desk_watch_w'
+const TESTER_H_KEY = 'desk_tester_h'
+
+const DEFAULT_WATCHLIST = [
   'BTCUSDT',
   'ETHUSDT',
   'SOLUSDT',
@@ -17,6 +21,17 @@ const FAVORITE_SYMBOLS = [
   'AVAXUSDT',
   'ADAUSDT',
 ]
+const WATCH_KEY = 'desk_watchlist_v1'
+
+function loadWatchlist() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(WATCH_KEY) || '[]')
+    if (Array.isArray(raw) && raw.length) {
+      return [...new Set(raw.map((s) => String(s).toUpperCase()))].slice(0, 40)
+    }
+  } catch { /* */ }
+  return [...DEFAULT_WATCHLIST]
+}
 const STRATEGIES = [
   'Donchian Breakout',
   'EMA Trend Following',
@@ -62,7 +77,7 @@ function isTypingTarget(el) {
 
 export default function App() {
   const [symbol, setSymbol] = useState('SOLUSDT')
-  const [strategy, setStrategy] = useState('Donchian Breakout')
+  const [strategy, setStrategy] = useState('')
   const [timeframe, setTimeframe] = useState('1h')
   const [period, setPeriod] = useState('5y')
   const [summary, setSummary] = useState(null)
@@ -86,19 +101,118 @@ export default function App() {
   const [testerTab, setTesterTab] = useState('overview')
   const [paperTrades, setPaperTrades] = useState([])
   const [watchQuotes, setWatchQuotes] = useState({})
+  const [watchlist, setWatchlist] = useState(() => loadWatchlist())
+  const [symMode, setSymMode] = useState('pick')
+  const [watchW, setWatchW] = useState(() => {
+    const n = Number(localStorage.getItem(WATCH_W_KEY))
+    return Number.isFinite(n) && n >= 160 && n <= 480 ? n : 240
+  })
+  const [testerH, setTesterH] = useState(() => {
+    const n = Number(localStorage.getItem(TESTER_H_KEY))
+    return Number.isFinite(n) && n >= 140 && n <= 640 ? n : 280
+  })
   const digitBuf = useRef('')
   const digitTimer = useRef(null)
   const pageSize = 50
 
-  const openSymbolSearch = useCallback((seed = '') => {
+  useEffect(() => {
+    try { localStorage.setItem(WATCH_W_KEY, String(watchW)) } catch { /* */ }
+  }, [watchW])
+
+  useEffect(() => {
+    try { localStorage.setItem(TESTER_H_KEY, String(testerH)) } catch { /* */ }
+  }, [testerH])
+
+  const startWatchResize = useCallback((e) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = watchW
+    const onMove = (ev) => {
+      const next = Math.min(480, Math.max(160, startW - (ev.clientX - startX)))
+      setWatchW(next)
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }, [watchW])
+
+  const startTesterResize = useCallback((e) => {
+    e.preventDefault()
+    const startY = e.clientY
+    const startH = testerH
+    const onMove = (ev) => {
+      const next = Math.min(640, Math.max(140, startH - (ev.clientY - startY)))
+      setTesterH(next)
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }, [testerH])
+
+  const syncWatchlistServer = useCallback(async (list) => {
+    try {
+      await fetch('/api/watchlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols: list }),
+      })
+    } catch { /* */ }
+  }, [])
+
+  useEffect(() => {
+    try { localStorage.setItem(WATCH_KEY, JSON.stringify(watchlist)) } catch { /* */ }
+    syncWatchlistServer(watchlist)
+  }, [watchlist, syncWatchlistServer])
+
+  const openSymbolSearch = useCallback((seed = '', mode = 'pick') => {
     setSymSeed(String(seed || '').toUpperCase())
+    setSymMode(mode)
     setSymOpen(true)
   }, [])
 
-  const pickSymbol = useCallback((sym) => {
-    setSymbol(sym)
+  const pickSymbol = useCallback(async (sym) => {
+    const resolved = await resolveTradableSymbol(sym)
+    if (!resolved.ok) {
+      setScanMsg(resolved.error)
+      return
+    }
+    const s = resolved.symbol
+    setSymbol(s)
+    setWatchlist((prev) => (prev.includes(s) ? prev : [...prev, s].slice(0, 40)))
     setSymOpen(false)
     setSymSeed('')
+    if (resolved.aliased) setScanMsg(`Using Binance symbol ${s}`)
+  }, [])
+
+  const addToWatchlist = useCallback(async (sym) => {
+    const resolved = await resolveTradableSymbol(sym)
+    if (!resolved.ok) {
+      setScanMsg(resolved.error)
+      return
+    }
+    const s = resolved.symbol
+    setWatchlist((prev) => (prev.includes(s) ? prev : [...prev, s].slice(0, 40)))
+    setSymbol(s)
+    setSymOpen(false)
+    setSymSeed('')
+    setScanMsg(
+      resolved.aliased
+        ? `Added ${s} (aliased) · Telegram scans 5m / 15m / 1h`
+        : `Added ${s} · Telegram scans 5m / 15m / 1h on watchlist`,
+    )
+  }, [])
+
+  const removeFromWatchlist = useCallback((sym) => {
+    setWatchlist((prev) => {
+      const next = prev.filter((s) => s !== sym)
+      return next.length ? next : [...DEFAULT_WATCHLIST]
+    })
   }, [])
 
   const applyDigitBuffer = useCallback((buf) => {
@@ -121,19 +235,19 @@ export default function App() {
       if (e.ctrlKey || e.metaKey || e.altKey) {
         if ((e.key === 'k' || e.key === 'K') && (e.ctrlKey || e.metaKey)) {
           e.preventDefault()
-          openSymbolSearch('')
+          openSymbolSearch('', 'pick')
         }
         return
       }
       if (e.key === '/') {
         e.preventDefault()
-        openSymbolSearch('')
+        openSymbolSearch('', 'pick')
         return
       }
       // TradingView: any letter opens symbol search and seeds the query
       if (/^[a-zA-Z]$/.test(e.key)) {
         e.preventDefault()
-        openSymbolSearch(e.key)
+        openSymbolSearch(e.key, 'pick')
         return
       }
       if (/^[0-9]$/.test(e.key)) {
@@ -165,7 +279,7 @@ export default function App() {
     let cancelled = false
     async function pollWatch() {
       try {
-        const qs = new URLSearchParams({ symbols: FAVORITE_SYMBOLS.join(',') })
+        const qs = new URLSearchParams({ symbols: watchlist.join(',') })
         const res = await fetch(`/api/ticker?${qs}`)
         const data = await res.json()
         if (cancelled || !res.ok) return
@@ -194,16 +308,25 @@ export default function App() {
       cancelled = true
       clearInterval(t)
     }
-  }, [])
+  }, [watchlist])
 
   useEffect(() => {
     let cancelled = false
     async function load() {
-      setLoading(true)
-      setError('')
       setPage(0)
       setSelectedIdx(null)
       setSelectedLiveTrade(null)
+      if (!strategy) {
+        setSummary(null)
+        setTradeList([])
+        setPeriodCards({})
+        setResultSource(null)
+        setError('')
+        setLoading(false)
+        return
+      }
+      setLoading(true)
+      setError('')
       try {
         const qs = new URLSearchParams({ symbol, strategy, timeframe, period })
         const res = await fetch(`/api/results?${qs}`)
@@ -241,9 +364,13 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false
+    const symQs = () => new URLSearchParams({
+      desk: '1',
+      symbols: watchlist.join(','),
+    })
     async function pollList() {
       try {
-        const res = await fetch('/api/signals')
+        const res = await fetch(`/api/scan?notify=0&${symQs()}`)
         const data = await res.json()
         if (cancelled || !res.ok) return
         setSignals(data.signals || [])
@@ -252,6 +379,7 @@ export default function App() {
           scannedAt: data.scannedAt,
           telegramConfigured: data.telegramConfigured,
           timeframe: data.timeframe,
+          timeframes: data.timeframes,
           recentDays: data.recentDays,
           recentHours: data.recentHours,
         })
@@ -259,10 +387,10 @@ export default function App() {
         /* ignore */
       }
     }
-    // While desk is open: live Telegram for fresh closed bars only (Hobby-safe; no Vercel hourly cron)
+    // Desk open: Telegram for fresh 5m/15m/1h signals on current watchlist
     async function pollLiveNotify() {
       try {
-        const res = await fetch('/api/scan?notify=1&desk=1')
+        const res = await fetch(`/api/scan?notify=1&${symQs()}`)
         const data = await res.json()
         if (cancelled || !res.ok) return
         setSignals(data.signals || [])
@@ -271,11 +399,12 @@ export default function App() {
           scannedAt: data.scannedAt,
           telegramConfigured: data.telegramConfigured,
           timeframe: data.timeframe,
+          timeframes: data.timeframes,
           recentDays: data.recentDays,
           recentHours: data.recentHours,
         })
         if (data.notifyCount > 0) {
-          setScanMsg(`Live alert · ${data.notifyCount} Telegram message(s) · ${data.timeframe || '1h'}`)
+          setScanMsg(`Live alert · ${data.notifyCount} Telegram · ${data.timeframe || '5m,15m,1h'}`)
         }
       } catch {
         /* ignore */
@@ -283,7 +412,6 @@ export default function App() {
     }
     pollList()
     const listTimer = setInterval(pollList, 60_000)
-    // Poll often while desk is open so Telegram fires minutes after bar close, not hours later
     const liveTimer = setInterval(pollLiveNotify, 60_000)
     const firstLive = setTimeout(pollLiveNotify, 8_000)
     return () => {
@@ -292,15 +420,19 @@ export default function App() {
       clearInterval(liveTimer)
       clearTimeout(firstLive)
     }
-  }, [])
+  }, [watchlist])
 
   async function triggerScan() {
     setScanBusy(true)
     setScanMsg('')
     try {
       setError('')
-      // Desk Scan: refresh last-24h real signals only — no Telegram history flood
-      const res = await fetch('/api/scan?notify=0&desk=1')
+      const qs = new URLSearchParams({
+        notify: '0',
+        desk: '1',
+        symbols: watchlist.join(','),
+      })
+      const res = await fetch(`/api/scan?${qs}`)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || `Scan ${res.status}`)
       setSignals(data.signals || [])
@@ -309,11 +441,12 @@ export default function App() {
         scannedAt: data.scannedAt,
         telegramConfigured: data.telegramConfigured,
         timeframe: data.timeframe,
+        timeframes: data.timeframes,
         recentDays: data.recentDays,
         recentHours: data.recentHours,
       })
       setScanMsg(
-        `Last ${data.recentHours || 24}h · ${data.recentCount || 0} real signal(s) · Telegram: keep desk open or GitHub hourly Action (Hobby Vercel = 1 cron/day)`,
+        `Last ${data.recentHours || 24}h · ${data.recentCount || 0} signals · TF ${(data.timeframes || ['5m', '15m', '1h']).join(', ')} · ${watchlist.length} watchlist coins`,
       )
       setTesterTab('signals')
     } catch (e) {
@@ -339,7 +472,7 @@ export default function App() {
   return (
     <div className="desk">
       <header className="tv-bar">
-        <button type="button" className="tv-symbol" onClick={() => openSymbolSearch('')} title="Symbol search — type any letter, / or Ctrl+K">
+        <button type="button" className="tv-symbol" onClick={() => openSymbolSearch('', 'pick')} title="Symbol search — type any letter, / or Ctrl+K">
           <span className="tv-symbol-name">{symbol}</span>
           <span className="tv-symbol-hint">Search</span>
         </button>
@@ -360,6 +493,7 @@ export default function App() {
         <label className="tv-field">
           <span>Strategy</span>
           <select value={strategy} onChange={(e) => setStrategy(e.target.value)}>
+            <option value="">None</option>
             {STRATEGIES.map((s) => (
               <option key={s} value={s}>{s}</option>
             ))}
@@ -395,7 +529,7 @@ export default function App() {
       )}
       {scanMsg && <div className="banner">{scanMsg}</div>}
 
-      <div className="tv-workspace">
+      <div className="tv-workspace" style={{ gridTemplateColumns: `1fr ${watchW}px` }}>
         <main className="tv-chart-col">
           <LiveDesk
             symbol={symbol}
@@ -410,30 +544,48 @@ export default function App() {
           />
         </main>
 
-        <aside className="tv-watch">
+        <aside className="tv-watch" style={{ width: watchW }}>
+          <div
+            className="tv-resize-x"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize watchlist"
+            onPointerDown={startWatchResize}
+          />
           <div className="tv-watch-head">
             <h2>Watchlist</h2>
-            <button type="button" onClick={() => openSymbolSearch('')}>+</button>
+            <button type="button" title="Add Binance symbol" onClick={() => openSymbolSearch('', 'add')}>+</button>
           </div>
           <div className="tv-watch-cols">
             <span>Symbol</span>
             <span>Last</span>
           </div>
           <ul className="tv-watch-list">
-            {FAVORITE_SYMBOLS.map((s) => {
+            {watchlist.map((s) => {
               const q = watchQuotes[s]
               const dirClass = q?.dir > 0 ? 'up' : q?.dir < 0 ? 'down' : ''
               return (
-                <li key={s}>
+                <li key={s} className="tv-watch-row">
                   <button
                     type="button"
                     className={s === symbol ? 'active' : ''}
                     onClick={() => setSymbol(s)}
                   >
-                    <strong>{s.replace('USDT', '')}</strong>
+                    <strong>{s.replace(/USDT$/, '')}</strong>
                     <span className={`tv-watch-px ${dirClass}`}>
                       {q?.price != null ? Number(q.price).toPrecision(6) : '…'}
                     </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="tv-watch-x"
+                    title={`Remove ${s}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      removeFromWatchlist(s)
+                    }}
+                  >
+                    ×
                   </button>
                 </li>
               )
@@ -442,13 +594,21 @@ export default function App() {
           <div className="tv-watch-detail">
             <span className="muted">Selected</span>
             <strong>{symbol}</strong>
-            <span>{strategy}</span>
+            <span>{strategy || 'No strategy'}</span>
             <span className="muted">{timeframe} · lookback {periodLabel}</span>
+            <span className="muted">Alerts: 5m · 15m · 1h</span>
           </div>
         </aside>
       </div>
 
-      <section className="tv-tester">
+      <section className="tv-tester" style={{ height: testerH, maxHeight: testerH }}>
+        <div
+          className="tv-resize-y"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize backtest panel"
+          onPointerDown={startTesterResize}
+        />
         <div className="tv-tester-head">
           <div className="tv-tester-tabs">
             <button
@@ -490,7 +650,7 @@ export default function App() {
             )}
           </div>
           <div className="tv-tester-meta">
-            <span>{strategy}</span>
+            <span>{strategy || 'No strategy'}</span>
             <span>{symbol}</span>
             <span>{timeframe}</span>
             <span>{periodLabel}</span>
@@ -770,13 +930,16 @@ export default function App() {
 
       <SymbolSearch
         open={symOpen}
-        favorites={FAVORITE_SYMBOLS}
+        favorites={watchlist}
         value={symbol}
         initialQuery={symSeed}
+        mode={symMode}
         onPick={pickSymbol}
+        onAdd={addToWatchlist}
         onClose={() => {
           setSymOpen(false)
           setSymSeed('')
+          setSymMode('pick')
         }}
       />
 

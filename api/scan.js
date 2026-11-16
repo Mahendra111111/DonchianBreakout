@@ -29,7 +29,11 @@ export default async function handler(req, res) {
   }
   try {
     const notify = req.query?.notify !== '0'
-    const result = await runSignalScan({ notify })
+    const symbolsRaw = String(req.query?.symbols || '').trim()
+    const symbols = symbolsRaw
+      ? symbolsRaw.split(',').map((s) => s.trim()).filter(Boolean)
+      : undefined
+    const result = await runSignalScan({ notify, symbols })
     res.status(200).json(result)
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) })

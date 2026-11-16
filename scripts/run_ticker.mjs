@@ -1,4 +1,4 @@
-import { fetchTicker } from '../lib/binance.mjs'
+import { fetchTicker, fetchTickers } from '../lib/binance.mjs'
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
@@ -8,8 +8,14 @@ const args = Object.fromEntries(
 )
 
 try {
-  const data = await fetchTicker((args.symbol || 'SOLUSDT').toUpperCase())
-  process.stdout.write(JSON.stringify(data))
+  if (args.symbols) {
+    const symbols = String(args.symbols).split(',').map((s) => s.trim()).filter(Boolean)
+    const tickers = await fetchTickers(symbols)
+    process.stdout.write(JSON.stringify({ tickers }))
+  } else {
+    const data = await fetchTicker((args.symbol || 'SOLUSDT').toUpperCase())
+    process.stdout.write(JSON.stringify(data))
+  }
 } catch (e) {
   console.error(String(e.message || e))
   process.exit(1)

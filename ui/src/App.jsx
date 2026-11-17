@@ -34,9 +34,7 @@ function loadWatchlist() {
 }
 const STRATEGIES = [
   'Donchian Breakout',
-  'EMA Trend Following',
   'Hammer SMA VWAP',
-  'VWAP Rejection V1',
 ]
 const TIMEFRAMES = SUPPORTED_TIMEFRAMES
 const PERIODS = [

@@ -1,18 +1,5 @@
 /** Indicator overlays: strategy lines + Volume / RSI / Support & Resistance. */
 
-function ewma(values, span) {
-  const out = new Array(values.length).fill(NaN)
-  const alpha = 2 / (span + 1)
-  let prev = null
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i]
-    if (!Number.isFinite(v)) continue
-    prev = prev == null ? v : alpha * v + (1 - alpha) * prev
-    out[i] = prev
-  }
-  return out
-}
-
 function sma(values, len) {
   const out = new Array(values.length).fill(NaN)
   for (let i = len - 1; i < values.length; i++) {
@@ -195,32 +182,12 @@ export function strategyOverlays(strategy, candles) {
     }
   }
 
-  if (strategy === 'EMA Trend Following') {
-    const closes = candles.map((c) => c.close)
-    return {
-      label: 'EMA 20 / 50',
-      lines: [
-        { title: 'EMA 20', color: '#c6f54c', data: toLine(candles, ewma(closes, 20)) },
-        { title: 'EMA 50', color: '#4aa3ff', data: toLine(candles, ewma(closes, 50)) },
-      ],
-    }
-  }
-
   if (strategy === 'Hammer SMA VWAP') {
     const closes = candles.map((c) => c.close)
     return {
       label: 'SMA 200 + VWAP',
       lines: [
         { title: 'SMA 200', color: '#c6f54c', data: toLine(candles, sma(closes, 200)) },
-        { title: 'Session VWAP', color: '#b388ff', data: toLine(candles, sessionVwap(candles)) },
-      ],
-    }
-  }
-
-  if (strategy === 'VWAP Rejection V1') {
-    return {
-      label: 'Session VWAP',
-      lines: [
         { title: 'Session VWAP', color: '#b388ff', data: toLine(candles, sessionVwap(candles)) },
       ],
     }

@@ -17,10 +17,8 @@ ROOT = Path(__file__).resolve().parent
 SUMMARY = ROOT / 'ui' / 'public' / 'strategy_summary.json'
 TRADES_DIR = ROOT / 'ui' / 'public' / 'trades'
 STRATEGIES = (
-    'EMA Trend Following',
     'Donchian Breakout',
     'Hammer SMA VWAP',
-    'VWAP Rejection V1',
 )
 SYMBOLS = (
     'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
